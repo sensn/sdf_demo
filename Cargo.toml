@@ -1,0 +1,12 @@
+[package]
+name = "sdf_demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cubecl = { version = "0.10.0", features = ["wgpu"] }
+bytemuck = { version = "1.16", features = ["derive"] }
+winit = { version = "0.29" }
+softbuffer = "0.4"
+pixels = "0.17.2"
+tokio = { version = "1.38", features = ["full"] } 
