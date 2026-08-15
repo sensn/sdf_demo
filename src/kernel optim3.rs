@@ -1,7 +1,5 @@
 use cubecl::prelude::*;
 
-
-
 #[derive(CubeType, Copy, Clone)]
 pub struct Vec3 {
     pub x: f32,
@@ -76,7 +74,6 @@ fn evaluate_dynamic_gyroid(p: Vec3, time: f32, size: f32) -> f32 {
     f32::max(base_sphere, gyroid * 0.5)
 }
 
-
 #[cube]
 fn evaluate_dynamic_torus(p: Vec3, time: f32, size: f32) -> f32 {
     let rot_speed_x = time * 0.6;
@@ -123,22 +120,25 @@ pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) ->
         let obj_size  = config[base_idx + 1usize];
         let offset_x  = config[base_idx + 2usize];
         let offset_z  = config[base_idx + 3usize];
-        // Lokalen Raum für den dynamischen Slot berechnen
+
         let p_slot = Vec3::new(local_p.x - offset_x, local_p.y, local_p.z - offset_z);
 
-        // ZURÜCK ZUM ORIGINAL: Echte Verzweigungen überlassen das Prädizieren dem AMD-Treiber!
-        if obj_type == 1u32 {
-            core_system = smin(core_system, evaluate_dynamic_crystal(p_slot, time, obj_size), blend_factor);
-        }
-        if obj_type == 2u32 {
-            core_system = smin(core_system, evaluate_dynamic_gyroid(p_slot, time, obj_size), blend_factor);
-        }
-        if obj_type == 3u32 {
-            core_system = smin(core_system, evaluate_dynamic_torus(p_slot, time, obj_size), blend_factor);
-        }
-    }
+        let d_crystal = evaluate_dynamic_crystal(p_slot, time, obj_size);
+        let d_gyroid  = evaluate_dynamic_gyroid(p_slot, time, obj_size);
+        let d_torus   = evaluate_dynamic_torus(p_slot, time, obj_size);
 
-   
+        let m_crystal = (obj_type == 1) as u32 as f32;
+        let m_gyroid  = (obj_type == 2) as u32 as f32;
+        let m_torus   = (obj_type == 3) as u32 as f32;
+        let m_default = (obj_type < 1 || obj_type > 3) as u32 as f32;
+
+        let selected_d = (d_crystal * m_crystal) 
+                       + (d_gyroid * m_gyroid) 
+                       + (d_torus * m_torus)
+                       + (1000.0f32 * m_default);
+
+        core_system = smin(core_system, selected_d, blend_factor);
+    }
 
     let pillar_x = f32::abs(f32::abs(local_p.x) - 5.0) - 0.6;
     let pillar_z = f32::abs(f32::abs(local_p.z) - 5.0) - 0.6;
@@ -170,7 +170,6 @@ pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) ->
     final_res
 }
 
-
 #[cube]
 fn scene_sdf_normal(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> Vec3 {
     let eps = 0.002f32;
@@ -184,7 +183,7 @@ fn scene_sdf_normal(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>)
 #[cube]
 fn calculate_soft_shadow(ro: Vec3, rd: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
     let mut res = 1.0f32;
-    let mut t = 0.04f32; 
+    let mut t = 0.04f32; // Leicht erhöhter Startversatz zur Artefaktvermeidung
     let t_max = 25.0f32;
     
     for _ in 0..32 {
@@ -194,13 +193,13 @@ fn calculate_soft_shadow(ro: Vec3, rd: Vec3, time: f32, blend_factor: f32, confi
             res = 0.0f32;
             break;
         }
-        res = f32::min(res, 8.0f32 * h / t);
+        res = f32::min(res, 8.0f32 * h / t); // Sanfterer Schattenübergangfaktor (K=8)
         t += f32::max(h, 0.04f32);
         if t > t_max {
             break;
         }
     }
-    f32::max(res, 0.2f32)
+    f32::max(res, 0.2f32) // Aufgehellter Minimalschatten gegen komplettes Absinken in Schwarz
 }
 
 #[cube]
@@ -215,51 +214,46 @@ fn calculate_ao(p: Vec3, normal: Vec3, time: f32, blend_factor: f32, config: &Te
         occ += (hr - dd) * sca;
         sca *= 0.90f32;
     }
-    f32::max(1.0f32 - occ * 0.5f32, 0.3f32)
+    f32::max(1.0f32 - occ * 0.5f32, 0.3f32) // Abgemilderte AO-Verdunkelung für bessere Sichtbarkeit
 }
 
 #[cube(launch)]
 pub fn raymarch_sdf_kernel(
     output: &mut Tensor<u32>,
     config: &Tensor<f32>, 
-    time: &f32,
-    width: &u32,
-    height: &u32,
-    shadow_mode: &u32,
-    cam_x: &f32,
-    cam_y: &f32,
-    cam_z: &f32,
-    blend_factor: &f32,
-    enable_ao_mode: &u32,
-    cam_yaw: &f32,
-    cam_pitch: &f32,
-    light_intensity: &f32, 
-    ambient_strength: &f32,
-    enable_key: &u32,   
-    enable_fill: &u32,  
-    enable_rim: &u32,   
+    time: f32,
+    width: u32,
+    height: u32,
+    shadow_mode: u32,
+    cam_x: f32,
+    cam_y: f32,
+    cam_z: f32,
+    blend_factor: f32,
+    enable_ao_mode: u32,
+    cam_yaw: f32,
+    cam_pitch: f32,
+    light_intensity: f32, 
+    ambient_strength: f32,
+    enable_key: u32,   
+    enable_fill: u32,  
+    enable_rim: u32,   
 ) {
     let x = ABSOLUTE_POS_X;
     let y = ABSOLUTE_POS_Y;
 
-    let w_val = *width;
-    let h_val = *height;
-    let t_val = *time;
-    let b_factor = *blend_factor;
-
-    if x < w_val && y < h_val {
-        let w_f = w_val as f32;
-        let h_f = h_val as f32;
+    if x < width && y < height {
+        let w_f = width as f32;
+        let h_f = height as f32;
         let uv_x = (x as f32 - (w_f / 2.0)) / h_f;
         let uv_y = ((h_f / 2.0) - y as f32) / h_f;
 
-        let ro = Vec3::new(*cam_x, *cam_y, *cam_z);
-        let rd = Vec3::new(uv_x, uv_y, 1.2f32); 
+        let ro = Vec3::new(cam_x, cam_y, cam_z);
+        let rd = Vec3::new(uv_x, uv_y, 1.2);
 
-        let cos_y = f32::cos(*cam_yaw);
-        let sin_y = f32::sin(*cam_yaw);
-        let cos_p = f32::cos(*cam_pitch);
-        let sin_p = f32::sin(*cam_pitch);
+        let cos_y = f32::cos(cam_yaw);
+        let sin_y = f32::sin(cam_yaw);
+        let cos_p = f32::cos(cam_pitch);
+        let sin_p = f32::sin(cam_pitch);
 
         let rd_y1 = rd.y * cos_p - rd.z * sin_p;
         let rd_z1 = rd.y * sin_p + rd.z * cos_p;
@@ -275,47 +269,55 @@ pub fn raymarch_sdf_kernel(
         
         for _ in 0..100 {
             let p = ro.add(final_rd.scale(t));
-            let d = scene_sdf(p, t_val, b_factor, config);
-            if d < 0.001f32 {
+            let d = scene_sdf(p, time, blend_factor, config);
+            if d < 0.001 {
                 hit_dist = t;
                 break;
             }
             t += d;
-            if t > 40.0f32 { break; }
+            if t > 40.0 { break; }
         }
 
+        // Hellerer, atmosphärischer Hintergrundhimmel (Graublau-Vignette statt Tiefblau)
         let bg_r = 0.35f32 - uv_y * 0.10f32;
         let bg_g = 0.45f32 - uv_y * 0.12f32;
         let bg_b = 0.60f32 - uv_y * 0.15f32;
 
-        let mut final_color_x = bg_r;
-        let mut final_color_y = bg_g;
-        let mut final_color_z = bg_b;
+        let mut r = bg_r;
+        let mut g = bg_g;
+        let mut b = bg_b;
 
-        if hit_dist < 40.0f32 {
+        if hit_dist < 40.0 {
             let p = ro.add(final_rd.scale(hit_dist));
-            let normal = scene_sdf_normal(p, t_val, b_factor, config);
+            let normal = scene_sdf_normal(p, time, blend_factor, config);
             
+            // Leistungsstarke, strategische 3-Punkt Lichtquellenplatzierung
             let key_light_pos  = Vec3::new(4.0, 7.0, -4.0);
             let fill_light_pos = Vec3::new(-5.0, 3.0, -3.0);
-            let rim_light_pos  = Vec3::new(0.0, 6.0, 5.0); 
-            
-            let key_dir  = key_light_pos.sub(p).normalize();
-            let fill_dir = fill_light_pos.sub(p).normalize();
-            let rim_dir  = rim_light_pos.sub(p).normalize();
-            
-// GEFIXT: Keine Verwendung von f32::max als Typen-Konstrukt.// In CubeCL ruft man die mathematischen Funktionen über die instanziierten Typen-Methoden auf!
-let mut diff_key  = normal.dot(key_dir).max(0.0f32);let diff_fill = normal.dot(fill_dir).max(0.0f32);let diff_rim  = normal.dot(rim_dir).max(0.0f32);if *shadow_mode == 1u32 {let shadow_factor = calculate_soft_shadow(p.add(normal.scale(0.02f32)), key_dir, t_val, b_factor, config);diff_key *= shadow_factor;}let mut ao_factor = 1.0f32;if *enable_ao_mode == 1u32 {ao_factor = calculate_ao(p, normal, t_val, b_factor, config);}let mut key_r = 1.00f32; let mut key_g = 0.95f32; let mut key_b = 0.85f32;let mut fill_r = 0.25f32; let mut fill_g = 0.40f32; let mut fill_b = 0.60f32;let mut rim_r = 0.50f32; let mut rim_g = 0.70f32; let mut rim_b = 1.00f32;if *enable_key == 0u32  { key_r = 0.0; key_g = 0.0; key_b = 0.0; }if *enable_fill == 0u32 { fill_r = 0.0; fill_g = 0.0; fill_b = 0.0; }if *enable_rim == 0u32  { rim_r = 0.0; rim_g = 0.0; rim_b = 0.0; }let mat_r = 0.85f32;let mat_g = 0.82f32;let mat_b = 0.78f32;let l_intensity = *light_intensity;// GEFIXT: f32::powf(...) durch den instanziierten .powf() Aufruf ersetzt, um den Typenfehler im Makro aufzulösen!
-let lit_r = (key_r * diff_key * l_intensity) + (fill_r * diff_fill * 0.7f32) + (rim_r * diff_rim.powf(3.0f32) * 1.5f32);let lit_g = (key_g * diff_key * l_intensity) + (fill_g * diff_fill * 0.7f32) + (rim_g * diff_rim.powf(3.0f32) * 1.5f32);let lit_b = (key_b * diff_key * l_intensity) + (fill_b * diff_fill * 0.7f32) + (rim_b * diff_rim.powf(3.0f32) * 1.5f32);let a_strength = *ambient_strength;let final_r = mat_r * (a_strength * ao_factor + lit_r * ao_factor);let final_g = mat_g * (a_strength * ao_factor + lit_g * ao_factor);let final_b = mat_b * (a_strength * ao_factor + lit_b * ao_factor);let mut fog = (40.0f32 - hit_dist) / (40.0f32 - 15.0f32);if fog > 1.0f32 { fog = 1.0f32; }if fog < 0.0f32 { fog = 0.0f32; }final_color_x = final_r * fog + bg_r * (1.0f32 - fog);final_color_y = final_g * fog + bg_g * (1.0f32 - fog);final_color_z = final_b * fog + bg_b * (1.0f32 - fog);}// GEFIXT: .max() und .min() direkt als Methoden auf den Werten aufrufen statt über den CPU-Pfad f32::max
-let r_u32 = (final_color_x.min(1.0).max(0.0) * 255.0) as u32;
-        let g_u32 = (final_color_y.min(1.0).max(0.0) * 255.0) as u32;
-        let b_u32 = (final_color_z.min(1.0).max(0.0) * 255.0) as u32;
-        let packed_pixel = (r_u32 << 16) | (g_u32 << 8) | b_u32;
+let rim_light_pos  = Vec3::new(0.0, 6.0, 5.0); 
+// Rim-Licht nach oben verlegt zur Architektur-Hervorhebung
+let key_dir  = key_light_pos.sub(p).normalize();let fill_dir = fill_light_pos.sub(p).normalize();let rim_dir  = rim_light_pos.sub(p).normalize();let mut diff_key  = f32::max(normal.dot(key_dir), 0.0f32);let diff_fill = f32::max(normal.dot(fill_dir), 0.0f32);let diff_rim  = f32::max(normal.dot(rim_dir), 0.0f32);if shadow_mode == 1u32 {let shadow_factor = calculate_soft_shadow(p.add(normal.scale(0.02f32)), key_dir, time, blend_factor, config);diff_key *= shadow_factor;}let mut ao_factor = 1.0f32;if enable_ao_mode == 1u32 {ao_factor = calculate_ao(p, normal, time, blend_factor, config);}
+// Kräftigere Farbabstimmung der Lichtkomponenten gegen das Ausbleichen
+let mut key_r = 1.00f32; let mut key_g = 0.95f32; let mut key_b = 0.85f32;let mut fill_r = 0.25f32; let mut fill_g = 0.40f32; let mut fill_b = 0.60f32;let mut rim_r = 0.50f32; let mut rim_g = 0.70f32; let mut rim_b = 1.00f32;if enable_key == 0u32  { key_r = 0.0; key_g = 0.0; key_b = 0.0; }if enable_fill == 0u32 { fill_r = 0.0; fill_g = 0.0; fill_b = 0.0; }if enable_rim == 0u32  { rim_r = 0.0; rim_g = 0.0; rim_b = 0.0; }
+// Tempel-Material-Albedo (Sandstein/Marmor-Weiß)
+let mat_r = 0.85f32;let mat_g = 0.82f32;let mat_b = 0.78f32;
+// Berechnung der Lichtintensitäten
+let lit_r = (key_r * diff_key * light_intensity) + (fill_r * diff_fill * 0.7f32) + (rim_r * f32::powf(diff_rim, 3.0f32) * 1.5f32);let lit_g = (key_g * diff_key * light_intensity) + (fill_g * diff_fill * 0.7f32) + (rim_g * f32::powf(diff_rim, 3.0f32) * 1.5f32);let lit_b = (key_b * diff_key * light_intensity) + (fill_b * diff_fill * 0.7f32) + (rim_b * f32::powf(diff_rim, 3.0f32) * 1.5f32);
+// Shading-Gleichung mit Raum-Aufhellung durch Ambient-Einfluss
+let final_r = mat_r * (ambient_strength * ao_factor + lit_r * ao_factor);let final_g = mat_g * (ambient_strength * ao_factor + lit_g * ao_factor);let final_b = mat_b * (ambient_strength * ao_factor + lit_b * ao_factor);
+// Sanfte lineare Nebel-Formel (Bypass für f32::mix über direkte Multiplikation)
+// Nebel greift erst ab Distanz 15 kontinuierlich bis zur maximalen Renderdistanz 40
+let mut fog = (40.0f32 - hit_dist) / (40.0f32 - 15.0f32);if fog > 1.0f32 { fog = 1.0f32; }if fog < 0.0f32 { fog = 0.0f32; }r = final_r * fog + bg_r * (1.0f32 - fog);g = final_g * fog + bg_g * (1.0f32 - fog);b = final_b * fog + bg_b * (1.0f32 - fog);}
+        let r_u8 = (f32::max(0.0f32, f32::min(1.0f32, r)) * 255.0f32) as u32;
+        let g_u8 = (f32::max(0.0f32, f32::min(1.0f32, g)) * 255.0f32) as u32;
+        let b_u8 = (f32::max(0.0f32, f32::min(1.0f32, b)) * 255.0f32) as u32;
+        let a_u8 = 255u32;
+
+        // GEFIXT: Alpha auf die höchsten Bits verschoben, Rot/Grün/Blau nachgezogen.
+        // Das sorgt für korrekte Kanaltrennung im Grafikspeicher von Vulkan/Wgpu.
+        let packed_color = (a_u8 << 24) | (r_u8 << 16) | (g_u8 << 8) | b_u8;
         
-        let x_usize = usize::cast_from(x);
-        let y_usize = usize::cast_from(y);
-        let width_usize = usize::cast_from(*width);
-        let pixel_index = y_usize * width_usize + x_usize;
-        output[pixel_index] = packed_pixel;
+        let output_idx = (y * width + x) as usize;
+        output[output_idx] = packed_color;
     }
 }

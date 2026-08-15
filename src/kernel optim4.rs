@@ -1,7 +1,5 @@
 use cubecl::prelude::*;
 
-
-
 #[derive(CubeType, Copy, Clone)]
 pub struct Vec3 {
     pub x: f32,
@@ -76,7 +74,6 @@ fn evaluate_dynamic_gyroid(p: Vec3, time: f32, size: f32) -> f32 {
     f32::max(base_sphere, gyroid * 0.5)
 }
 
-
 #[cube]
 fn evaluate_dynamic_torus(p: Vec3, time: f32, size: f32) -> f32 {
     let rot_speed_x = time * 0.6;
@@ -123,22 +120,34 @@ pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) ->
         let obj_size  = config[base_idx + 1usize];
         let offset_x  = config[base_idx + 2usize];
         let offset_z  = config[base_idx + 3usize];
-        // Lokalen Raum für den dynamischen Slot berechnen
+
         let p_slot = Vec3::new(local_p.x - offset_x, local_p.y, local_p.z - offset_z);
 
-        // ZURÜCK ZUM ORIGINAL: Echte Verzweigungen überlassen das Prädizieren dem AMD-Treiber!
-        if obj_type == 1u32 {
-            core_system = smin(core_system, evaluate_dynamic_crystal(p_slot, time, obj_size), blend_factor);
-        }
-        if obj_type == 2u32 {
-            core_system = smin(core_system, evaluate_dynamic_gyroid(p_slot, time, obj_size), blend_factor);
-        }
-        if obj_type == 3u32 {
-            core_system = smin(core_system, evaluate_dynamic_torus(p_slot, time, obj_size), blend_factor);
-        }
-    }
+        let d_crystal = evaluate_dynamic_crystal(p_slot, time, obj_size);
+        let d_gyroid  = evaluate_dynamic_gyroid(p_slot, time, obj_size);
+        let d_torus   = evaluate_dynamic_torus(p_slot, time, obj_size);
 
-   
+        // Masken ermitteln
+        let m_crystal = (obj_type == 1) as u32 as f32;
+        let m_gyroid  = (obj_type == 2) as u32 as f32;
+        let m_torus   = (obj_type == 3) as u32 as f32;
+        
+        // Ist es überhaupt ein gültiges Objekt? (1, 2 oder 3)
+        let is_valid = (obj_type >= 1 && obj_type <= 3) as u32 as f32;
+
+        // Berechne die reine Geometrie-SDF für diesen Slot
+        let raw_object_d = (d_crystal * m_crystal) 
+                         + (d_gyroid * m_gyroid) 
+                         + (d_torus * m_torus);
+
+        // WICHTIGER MATHEMATISCHER FIX: 
+        // Wir führen das smin NUR mit dem echten Objekt aus.
+        let merged_system = smin(core_system, raw_object_d, blend_factor);
+
+        // Wenn der Slot gültig ist, übernehmen wir das fusionierte smin-Ergebnis.
+        // Wenn nicht (Luft/ungültig), behalten wir das alte core_system unverändert bei!
+        core_system = (merged_system * is_valid) + (core_system * (1.0f32 - is_valid));
+    }
 
     let pillar_x = f32::abs(f32::abs(local_p.x) - 5.0) - 0.6;
     let pillar_z = f32::abs(f32::abs(local_p.z) - 5.0) - 0.6;
