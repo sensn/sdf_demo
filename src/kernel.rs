@@ -1,8 +1,11 @@
 use cubecl::prelude::*;
+use cubecl::frontend::CubeType;
 
 
-
+// 1. Zuerst die normalen Rust-Derives
 #[derive(CubeType, Copy, Clone)]
+// HIER: Damit wird das Trait CloneExpand automatisch für Vec3Expand generiert!
+#[cube(derive(Copy, Clone))] 
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
@@ -99,123 +102,149 @@ fn evaluate_dynamic_torus(p: Vec3, time: f32, size: f32) -> f32 {
     f32::sqrt(q_x * q_x + rx_y * rx_y) - r_minor
 }
 
+use cubecl::prelude::*;
+
 #[cube]
 pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
-    let cell_size = 10.0f32;
-    let half_cell = cell_size * 0.5;
+    let cell_size = f32::new(10.0);
+    let half_cell = cell_size * f32::new(0.5);
     
-    let grid_p_x = p.x - cell_size * f32::floor((p.x + half_cell) / cell_size);
-    let grid_p_y = p.y - cell_size * f32::floor((p.y + half_cell) / cell_size); 
-    let grid_p_z = p.z - cell_size * f32::floor((p.z + half_cell) / cell_size);
+    let grid_p_x = p.x - cell_size * ((p.x + half_cell) / cell_size).floor();
+    let grid_p_y = p.y - cell_size * ((p.y + half_cell) / cell_size).floor(); 
+    let grid_p_z = p.z - cell_size * ((p.z + half_cell) / cell_size).floor();
     
     let local_p = Vec3::new(grid_p_x, grid_p_y, grid_p_z);
-    let mut core_system = 1000.0f32;
+    let mut core_system = f32::new(1000.0);
 
-    let active_slots = config[0usize] as usize;
+    let active_slots = usize::cast_from(config[usize::new(0)]);
 
-    for i in 0..100 {
-        if i >= active_slots {
+    // Der Schleifenzähler läuft nun als usize
+    let mut i = usize::new(0);
+    loop {
+        if i >= usize::new(100) || i >= active_slots {
             break; 
         }
 
-        let base_idx = 1usize + i * 4usize;
-        let obj_type  = config[base_idx] as u32;
-        let obj_size  = config[base_idx + 1usize];
-        let offset_x  = config[base_idx + 2usize];
-        let offset_z  = config[base_idx + 3usize];
-        // Lokalen Raum für den dynamischen Slot berechnen
+        // Alle Berechnungen für Tensor-Indizes sauber in usize
+        let base_idx = usize::new(1) + i * usize::new(4);
+        
+        let obj_type  = u32::cast_from(config[base_idx]);
+        let obj_size  = config[base_idx + usize::new(1)];
+        let offset_x  = config[base_idx + usize::new(2)];
+        let offset_z  = config[base_idx + usize::new(3)];
+        
         let p_slot = Vec3::new(local_p.x - offset_x, local_p.y, local_p.z - offset_z);
 
-        // ZURÜCK ZUM ORIGINAL: Echte Verzweigungen überlassen das Prädizieren dem AMD-Treiber!
-        if obj_type == 1u32 {
+        if obj_type == u32::new(1) {
             core_system = smin(core_system, evaluate_dynamic_crystal(p_slot, time, obj_size), blend_factor);
         }
-        if obj_type == 2u32 {
+        if obj_type == u32::new(2) {
             core_system = smin(core_system, evaluate_dynamic_gyroid(p_slot, time, obj_size), blend_factor);
         }
-        if obj_type == 3u32 {
+        if obj_type == u32::new(3) {
             core_system = smin(core_system, evaluate_dynamic_torus(p_slot, time, obj_size), blend_factor);
         }
+
+         i += usize::new(1);
     }
 
-   
-
-    let pillar_x = f32::abs(f32::abs(local_p.x) - 5.0) - 0.6;
-    let pillar_z = f32::abs(f32::abs(local_p.z) - 5.0) - 0.6;
-    let corner_pillars = f32::max(pillar_x, pillar_z);
+    let pillar_x = (local_p.x.abs() - f32::new(5.0)).abs() - f32::new(0.6);
+    let pillar_z = (local_p.z.abs() - f32::new(5.0)).abs() - f32::new(0.6);
+    let corner_pillars = pillar_x.max(pillar_z);
     
-    let room_floor = local_p.y + 3.0; 
-    let room_ceiling = 3.0 - local_p.y; 
-    let floor_and_ceiling = f32::min(room_floor, room_ceiling) - 0.1;
+    let room_floor = local_p.y + f32::new(3.0); 
+    let room_ceiling = f32::new(3.0) - local_p.y; 
+    let floor_and_ceiling = room_floor.min(room_ceiling) - f32::new(0.1);
 
-    let arch_radius = 3.2f32; 
-    let arch_z = f32::sqrt(local_p.x * local_p.x + (local_p.y - 1.0) * (local_p.y - 1.0)) - arch_radius;
-    let arch_x = f32::sqrt(local_p.z * local_p.z + (local_p.y - 1.0) * (local_p.y - 1.0)) - arch_radius;
-    let wall_arches = f32::min(arch_z, arch_x);
+    let arch_radius = f32::new(3.2); 
+    let arch_z = (local_p.x * local_p.x + (local_p.y - f32::new(1.0)) * (local_p.y - f32::new(1.0))).sqrt() - arch_radius;
+    let arch_x = (local_p.z * local_p.z + (local_p.y - f32::new(1.0)) * (local_p.y - f32::new(1.0))).sqrt() - arch_radius;
+    let wall_arches = arch_z.min(arch_x);
 
-    let mut architecture = f32::min(corner_pillars, floor_and_ceiling);
-    architecture = f32::max(architecture, -wall_arches);
+    let mut architecture = corner_pillars.min(floor_and_ceiling);
+    architecture = architecture.max(-wall_arches);
 
-    let s1_decor = 2.0f32;
-    let pillar_holes = (f32::abs(f32::sin(local_p.x * s1_decor)) + f32::abs(f32::cos(local_p.y * s1_decor)) + f32::abs(f32::sin(local_p.z * s1_decor))) * 0.03;
-    architecture = f32::max(architecture, -(pillar_holes - 0.01));
+    let s1_decor = f32::new(2.0);
+    let pillar_holes = ( (local_p.x * s1_decor).sin().abs() + (local_p.y * s1_decor).cos().abs() + (local_p.z * s1_decor).sin().abs() ) * f32::new(0.03);
+    architecture = architecture.max(-(pillar_holes - f32::new(0.01)));
 
     let combined_core = smin(core_system, architecture, blend_factor);
     
-    let mut final_res = f32::min(core_system, architecture);
-    if blend_factor > 10.0 {
-        final_res = smin(combined_core, architecture, 0.7) - 0.1;
+    let mut final_res = core_system.min(architecture);
+    if blend_factor > f32::new(10.0) {
+        final_res = smin(combined_core, architecture, f32::new(0.7)) - f32::new(0.1);
     }
     
     final_res
 }
 
-
 #[cube]
-fn scene_sdf_normal(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> Vec3 {
-    let eps = 0.002f32;
+pub fn scene_sdf_normal(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> Vec3 {
+    let eps = f32::new(0.002);
     let d = scene_sdf(p, time, blend_factor, config);
-    let nx = scene_sdf(Vec3::new(p.x + eps, p.y, p.z), time, blend_factor, config) - d;
-    let ny = scene_sdf(Vec3::new(p.x, p.y + eps, p.z), time, blend_factor, config) - d;
-    let nz = scene_sdf(Vec3::new(p.x, p.y, p.z + eps), time, blend_factor, config) - d;
+    
+    // Fix: Zuweisung zu separaten Variablen vor Funktionsübergabe
+    let p_x = Vec3::new(p.x + eps, p.y, p.z);
+    let p_y = Vec3::new(p.x, p.y + eps, p.z);
+    let p_z = Vec3::new(p.x, p.y, p.z + eps);
+
+    let nx = scene_sdf(p_x, time, blend_factor, config) - d;
+    let ny = scene_sdf(p_y, time, blend_factor, config) - d;
+    let nz = scene_sdf(p_z, time, blend_factor, config) - d;
+    
     Vec3::new(nx, ny, nz).normalize()
 }
 
 #[cube]
-fn calculate_soft_shadow(ro: Vec3, rd: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
-    let mut res = 1.0f32;
-    let mut t = 0.04f32; 
-    let t_max = 25.0f32;
+pub fn calculate_soft_shadow(ro: Vec3, rd: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
+    let mut res = f32::new(1.0);
+    let mut t = f32::new(0.04); 
+    let t_max = f32::new(25.0);
     
-    for _ in 0..32 {
-        let p = ro.add(rd.scale(t));
-        let h = scene_sdf(p, time, blend_factor, config);
-        if h < 0.001f32 {
-            res = 0.0f32;
+    let mut step = u32::new(0);
+    loop {
+        if step >= u32::new(32) {
             break;
         }
-        res = f32::min(res, 8.0f32 * h / t);
-        t += f32::max(h, 0.04f32);
+
+        let p = ro.add(rd.scale(t));
+        let h = scene_sdf(p, time, blend_factor, config);
+        if h < f32::new(0.001) {
+            res = f32::new(0.0);
+            break;
+        }
+        res = res.min(f32::new(8.0) * h / t);
+        t += h.max(f32::new(0.04));
         if t > t_max {
             break;
         }
+
+        step += u32::new(1);
     }
-    f32::max(res, 0.2f32)
+    res.max(f32::new(0.2))
 }
 
 #[cube]
-fn calculate_ao(p: Vec3, normal: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
-    let mut occ = 0.0f32;
-    let mut sca = 1.0f32;
+pub fn calculate_ao(p: Vec3, normal: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
+    let mut occ = f32::new(0.0);
+    let mut sca = f32::new(1.0);
     
-    for i in 1..5 {
-        let hr = (i as f32) * 0.15f32;
+    let mut i = u32::new(1);
+    loop {
+        if i >= u32::new(5) {
+            break;
+        }
+
+        let hr = f32::cast_from(i) * f32::new(0.15);
         let ao_pos = p.add(normal.scale(hr));
         let dd = scene_sdf(ao_pos, time, blend_factor, config);
         occ += (hr - dd) * sca;
-        sca *= 0.90f32;
+        sca *= f32::new(0.90);
+
+        i += u32::new(1);
     }
-    f32::max(1.0f32 - occ * 0.5f32, 0.3f32)
+(f32::new(1.0) - (occ * f32::new(0.5))).max(f32::new(0.3))
+
 }
 
 #[cube(launch)]

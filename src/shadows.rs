@@ -1,6 +1,11 @@
 use cubecl::prelude::*;
-use crate::kernel::{Vec3, scene_sdf};
-
+use cubecl::frontend::CubeType;
+// Importiere das originale Struct UND die CubeCL-Erweiterung
+//use crate::kernel::{Vec3, Vec3Expand, scene_sdf, scene_sdf_expand};
+use crate::kernel::{Vec3, Vec3Expand, scene_sdf}; 
+// Sollte der Compiler im Hintergrund immer noch nach der Expansion suchen,
+// holt dieser Wildcard-Import sie automatisch und fehlerfrei in den Scope:
+use crate::kernel::*; 
 /// Lokaler harter Schatten für das Baukastensystem
 #[cube]
 pub fn calculate_hard_shadow(
@@ -10,23 +15,33 @@ pub fn calculate_hard_shadow(
     blend_factor: f32,
     config: &Tensor<f32>
 ) -> f32 {
-    let cell_size = 10.0f32; 
-    let half_cell = cell_size * 0.5;
-    let local_x = p.x - cell_size * f32::floor((p.x + half_cell) / cell_size);
-    let local_y = p.y - cell_size * f32::floor((p.y + half_cell) / cell_size);
-    let local_z = p.z - cell_size * f32::floor((p.z + half_cell) / cell_size);
+    let cell_size = f32::new(10.0); 
+    let half_cell = cell_size * f32::new(0.5);
+    
+    let local_x = p.x - cell_size * ((p.x + half_cell) / cell_size).floor();
+    let local_y = p.y - cell_size * ((p.y + half_cell) / cell_size).floor();
+    let local_z = p.z - cell_size * ((p.z + half_cell) / cell_size).floor();
     let local_p = Vec3::new(local_x, local_y, local_z);
     
     let max_t = local_p.length();
-    let mut t = 0.15; 
-    let mut shadow_factor = 1.0;
+    let mut t = f32::new(0.15); 
+    let mut shadow_factor = f32::new(1.0);
 
-    for _ in 0..25 {
-        let current_pos = p.add(light_dir.scale(t));
+    let mut step = u32::new(0);
+    loop {
+        if step >= u32::new(25) {
+            break;
+        }
+
+        // FIX: Lokale Kopien für die Schleifen-Closure erstellen
+        let current_p = p.clone();
+        let current_dir = light_dir.clone();
+
+        let current_pos = current_p.add(current_dir.scale(t));
         let d = scene_sdf(current_pos, time, blend_factor, config);
         
-        if d < 0.001 {
-            shadow_factor = 0.25; 
+        if d < f32::new(0.001) {
+            shadow_factor = f32::new(0.25); 
             break;
         }
         
@@ -34,6 +49,8 @@ pub fn calculate_hard_shadow(
         if t >= max_t {
             break; 
         }
+
+        step += u32::new(1);
     }
 
     shadow_factor
@@ -49,33 +66,45 @@ pub fn calculate_soft_shadow(
     blend_factor: f32,
     config: &Tensor<f32>
 ) -> f32 {
-    let cell_size = 10.0f32;
-    let half_cell = cell_size * 0.5;
-    let local_x = p.x - cell_size * f32::floor((p.x + half_cell) / cell_size);
-    let local_y = p.y - cell_size * f32::floor((p.y + half_cell) / cell_size);
-    let local_z = p.z - cell_size * f32::floor((p.z + half_cell) / cell_size);
+    let cell_size = f32::new(10.0);
+    let half_cell = cell_size * f32::new(0.5);
+    
+    let local_x = p.x - cell_size * ((p.x + half_cell) / cell_size).floor();
+    let local_y = p.y - cell_size * ((p.y + half_cell) / cell_size).floor();
+    let local_z = p.z - cell_size * ((p.z + half_cell) / cell_size).floor();
     let local_p = Vec3::new(local_x, local_y, local_z);
 
     let max_t = local_p.length();
-    let mut t = 0.15;
-    let mut res = 1.0;
+    let mut t = f32::new(0.15);
+    let mut res = f32::new(1.0);
 
-    for _ in 0..25 {
-        let current_pos = p.add(light_dir.scale(t));
+    let mut step = u32::new(0);
+    loop {
+        if step >= u32::new(25) {
+            break;
+        }
+
+        // FIX: Lokale Kopien für die Schleifen-Closure erstellen
+        let current_p = p.clone();
+        let current_dir = light_dir.clone();
+
+        let current_pos = current_p.add(current_dir.scale(t));
         let d = scene_sdf(current_pos, time, blend_factor, config);
         
-        if d < 0.001 {
-            res = 0.0;
+        if d < f32::new(0.001) {
+            res = f32::new(0.0);
             break;
         }
         
-        res = f32::min(res, k * d / t);
+        res = res.min(k * d / t);
         
         t += d;
         if t >= max_t {
             break;
         }
+
+        step += u32::new(1);
     }
 
-    res.min(1.0).max(0.25)
+    res.min(f32::new(1.0)).max(f32::new(0.25))
 }

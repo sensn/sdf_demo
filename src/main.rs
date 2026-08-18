@@ -3,7 +3,12 @@ pub mod shadows;
 pub mod ambient_occlusion;
 
 use cubecl::prelude::*;
-use cubecl::wgpu::WgpuRuntime;
+
+//use cubecl::wgpu::WgpuRuntime;
+use cubecl::client::ComputeClient; // Expliziter Import des Client-Typs
+use cubecl::wgpu::{WgpuRuntime, AutoCompiler};
+
+//use cubecl::wgpu::AutoCompiler; // Make sure this is in scope
 use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -61,7 +66,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let device = Default::default();
-    let client = WgpuRuntime::client(&device);
+    //let client = WgpuRuntime::client(&device); // 0.10
+    //let client = WgpuRuntime::client::<AutoCompiler>(&device); //0.11.0-pre.2
+    // Specifying the compiler generic directly on WgpuRuntime or letting type inference handle it:
+// Wir geben dem Compiler den konkreten Typ vor, damit er weiß, dass AutoCompiler genutzt wird
+let client: ComputeClient<cubecl::wgpu::WgpuRuntime<AutoCompiler>> = 
+    cubecl::wgpu::WgpuRuntime::client(&device);
+
     let output_handle = client.empty(byte_size);
 
     let event_loop = EventLoop::new()?;
