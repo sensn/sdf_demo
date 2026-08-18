@@ -47,48 +47,50 @@ impl Vec3 {
     }
 }
 
+
 #[cube]
-fn smin(a: f32, b: f32, k: f32) -> f32 {
-    let h = f32::max(k - f32::abs(a - b), 0.0) / k;
-    a.min(b) - h * h * k * 0.25
+pub fn smin(a: f32, b: f32, k: f32) -> f32 {
+    let h = (k - (a - b).abs()).max(f32::new(0.0)) / k;
+    a.min(b) - h * h * k * f32::new(0.25)
 }
 
 #[cube]
-fn evaluate_dynamic_crystal(p: Vec3, time: f32, size: f32) -> f32 {
-    let rot_speed = time * 0.4;
-    let cos_r = f32::cos(rot_speed);
-    let sin_r = f32::sin(rot_speed);
+pub fn evaluate_dynamic_crystal(p: Vec3, time: f32, size: f32) -> f32 {
+    let rot_speed = time * f32::new(0.4);
+    let cos_r = rot_speed.cos();
+    let sin_r = rot_speed.sin();
     let crystal_x = p.x * cos_r - p.z * sin_r;
     let crystal_z = p.x * sin_r + p.z * cos_r;
     
-    let base_crystal = (f32::abs(crystal_x) + f32::abs(p.y) + f32::abs(crystal_z) - size) * 0.57735027f32;
-    let waves = f32::sin(crystal_x * 6.0) * f32::sin(p.y * 6.0) * f32::sin(crystal_z * 6.0) * 0.04;
+    let base_crystal = (crystal_x.abs() + p.y.abs() + crystal_z.abs() - size) * f32::new(0.57735027);
+    let waves = (crystal_x * f32::new(6.0)).sin() * (p.y * f32::new(6.0)).sin() * (crystal_z * f32::new(6.0)).sin() * f32::new(0.04);
     base_crystal + waves
 }
 
 #[cube]
-fn evaluate_dynamic_gyroid(p: Vec3, time: f32, size: f32) -> f32 {
-    let sphere_center = Vec3::new(0.0, f32::sin(time * 3.5) * 0.2, 0.0);
+pub fn evaluate_dynamic_gyroid(p: Vec3, time: f32, size: f32) -> f32 {
+    // Fix: Variable auslagern vor der Verwendung, um CubeType-Fehler zu vermeiden
+    let center_y = (time * f32::new(3.5)).sin() * f32::new(0.2);
+    let sphere_center = Vec3::new(f32::new(0.0), center_y, f32::new(0.0));
     let base_sphere = p.sub(sphere_center).length() - size;
     
-    let scale = 6.0f32;
-    let gyroid = (f32::sin(p.x * scale) * f32::cos(p.y * scale) 
-                + f32::cos(p.x * scale) * f32::sin(p.z * scale) 
-                + f32::sin(p.y * scale) * f32::cos(p.z * scale)) / scale;
+    let scale = f32::new(6.0);
+    let gyroid = ((p.x * scale).sin() * (p.y * scale).cos() 
+                + (p.x * scale).cos() * (p.z * scale).sin() 
+                + (p.y * scale).sin() * (p.z * scale).cos()) / scale;
                 
-    f32::max(base_sphere, gyroid * 0.5)
+    base_sphere.max(gyroid * f32::new(0.5))
 }
 
-
 #[cube]
-fn evaluate_dynamic_torus(p: Vec3, time: f32, size: f32) -> f32 {
-    let rot_speed_x = time * 0.6;
-    let rot_speed_y = time * 0.3;
+pub fn evaluate_dynamic_torus(p: Vec3, time: f32, size: f32) -> f32 {
+    let rot_speed_x = time * f32::new(0.6);
+    let rot_speed_y = time * f32::new(0.3);
     
-    let cos_x = f32::cos(rot_speed_x);
-    let sin_x = f32::sin(rot_speed_x);
-    let cos_y = f32::cos(rot_speed_y);
-    let sin_y = f32::sin(rot_speed_y);
+    let cos_x = rot_speed_x.cos();
+    let sin_x = rot_speed_x.sin();
+    let cos_y = rot_speed_y.cos();
+    let sin_y = rot_speed_y.sin();
     
     let ry_x = p.x * cos_y - p.z * sin_y;
     let ry_z = p.x * sin_y + p.z * cos_y;
@@ -96,13 +98,12 @@ fn evaluate_dynamic_torus(p: Vec3, time: f32, size: f32) -> f32 {
     let rx_z = p.y * sin_x + ry_z * cos_x;
     
     let r_major = size;
-    let r_minor = size * 0.15;
+    let r_minor = size * f32::new(0.15);
     
-    let q_x = f32::sqrt(ry_x * ry_x + rx_z * rx_z) - r_major;
-    f32::sqrt(q_x * q_x + rx_y * rx_y) - r_minor
+    let q_x = (ry_x * ry_x + rx_z * rx_z).sqrt() - r_major;
+    (q_x * q_x + rx_y * rx_y).sqrt() - r_minor
 }
 
-use cubecl::prelude::*;
 
 #[cube]
 pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
@@ -126,14 +127,18 @@ pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) ->
         }
 
         // Alle Berechnungen für Tensor-Indizes sauber in usize
-        let base_idx = usize::new(1) + i * usize::new(4);
+                // In src/kernel.rs -> innerhalb der loop-Schleife:
+        let base_idx = usize::new(1) + i * usize::new(5); // Von 4 auf 5 geändert!
         
         let obj_type  = u32::cast_from(config[base_idx]);
         let obj_size  = config[base_idx + usize::new(1)];
         let offset_x  = config[base_idx + usize::new(2)];
-        let offset_z  = config[base_idx + usize::new(3)];
+        let offset_y  = config[base_idx + usize::new(3)]; // NEU auf der GPU!
+        let offset_z  = config[base_idx + usize::new(4)];
         
-        let p_slot = Vec3::new(local_p.x - offset_x, local_p.y, local_p.z - offset_z);
+        // Lokalen Raum berechnen inklusive der neuen Y-Höhe
+        let p_slot = Vec3::new(local_p.x - offset_x, local_p.y - offset_y, local_p.z - offset_z);
+
 
         if obj_type == u32::new(1) {
             core_system = smin(core_system, evaluate_dynamic_crystal(p_slot, time, obj_size), blend_factor);
@@ -251,44 +256,46 @@ pub fn calculate_ao(p: Vec3, normal: Vec3, time: f32, blend_factor: f32, config:
 pub fn raymarch_sdf_kernel(
     output: &mut Tensor<u32>,
     config: &Tensor<f32>, 
-    time: &f32,
-    width: &u32,
-    height: &u32,
-    shadow_mode: &u32,
-    cam_x: &f32,
-    cam_y: &f32,
-    cam_z: &f32,
-    blend_factor: &f32,
-    enable_ao_mode: &u32,
-    cam_yaw: &f32,
-    cam_pitch: &f32,
-    light_intensity: &f32, 
-    ambient_strength: &f32,
-    enable_key: &u32,   
-    enable_fill: &u32,  
-    enable_rim: &u32,   
+    time: f32,
+    width: u32,
+    height: u32,
+    shadow_mode: u32,
+    cam_x: f32,
+    cam_y: f32,
+    cam_z: f32,
+    blend_factor: f32,
+    enable_ao_mode: u32,
+    cam_yaw: f32,
+    cam_pitch: f32,
+    light_intensity: f32, 
+    ambient_strength: f32,
+    enable_key: u32,   
+    enable_fill: u32,  
+    enable_rim: u32,   
 ) {
     let x = ABSOLUTE_POS_X;
     let y = ABSOLUTE_POS_Y;
 
-    let w_val = *width;
-    let h_val = *height;
-    let t_val = *time;
-    let b_factor = *blend_factor;
+    // In 0.11 werden Primitiv-Argumente direkt als Kopie übergeben (keine Dereferenzierung `*` nötig)
+    let w_val = width;
+    let h_val = height;
+    let t_val = time;
+    let b_factor = blend_factor;
 
     if x < w_val && y < h_val {
-        let w_f = w_val as f32;
-        let h_f = h_val as f32;
-        let uv_x = (x as f32 - (w_f / 2.0)) / h_f;
-        let uv_y = ((h_f / 2.0) - y as f32) / h_f;
+        let w_f = f32::cast_from(w_val);
+        let h_f = f32::cast_from(h_val);
+        
+        let uv_x = (f32::cast_from(x) - (w_f / f32::new(2.0))) / h_f;
+        let uv_y = ((h_f / f32::new(2.0)) - f32::cast_from(y)) / h_f;
 
-        let ro = Vec3::new(*cam_x, *cam_y, *cam_z);
-        let rd = Vec3::new(uv_x, uv_y, 1.2f32); 
+        let ro = Vec3::new(cam_x, cam_y, cam_z);
+        let rd = Vec3::new(uv_x, uv_y, f32::new(1.2)); 
 
-        let cos_y = f32::cos(*cam_yaw);
-        let sin_y = f32::sin(*cam_yaw);
-        let cos_p = f32::cos(*cam_pitch);
-        let sin_p = f32::sin(*cam_pitch);
+        let cos_y = cam_yaw.cos();
+        let sin_y = cam_yaw.sin();
+        let cos_p = cam_pitch.cos();
+        let sin_p = cam_pitch.sin();
 
         let rd_y1 = rd.y * cos_p - rd.z * sin_p;
         let rd_z1 = rd.y * sin_p + rd.z * cos_p;
@@ -299,52 +306,110 @@ pub fn raymarch_sdf_kernel(
             -rd.x * sin_y + rd_z1 * cos_y
         ).normalize();
 
-        let mut t = 0.1f32;
-        let mut hit_dist = 100.0f32;
+        let mut t = f32::new(0.1);
+        let mut hit_dist = f32::new(100.0);
         
-        for _ in 0..100 {
-            let p = ro.add(final_rd.scale(t));
+        // FIX: loop-Konstrukt statt for-Schleife wegen FnMut/Closure-Eigenschaften in 0.11
+        let mut ray_step = u32::new(0);
+        loop {
+            if ray_step >= u32::new(100) {
+                break;
+            }
+            
+            // FIX: Variablen-Klone für die Closure sichern
+            let current_ro = ro.clone();
+            let current_rd = final_rd.clone();
+
+            let p = current_ro.add(current_rd.scale(t));
             let d = scene_sdf(p, t_val, b_factor, config);
-            if d < 0.001f32 {
+            if d < f32::new(0.001) {
                 hit_dist = t;
                 break;
             }
             t += d;
-            if t > 40.0f32 { break; }
+            if t > f32::new(40.0) { 
+                break; 
+            }
+            ray_step += u32::new(1);
         }
 
-        let bg_r = 0.35f32 - uv_y * 0.10f32;
-        let bg_g = 0.45f32 - uv_y * 0.12f32;
-        let bg_b = 0.60f32 - uv_y * 0.15f32;
+        let bg_r = f32::new(0.35) - uv_y * f32::new(0.10);
+        let bg_g = f32::new(0.45) - uv_y * f32::new(0.12);
+        let bg_b = f32::new(0.60) - uv_y * f32::new(0.15);
 
         let mut final_color_x = bg_r;
         let mut final_color_y = bg_g;
         let mut final_color_z = bg_b;
 
-        if hit_dist < 40.0f32 {
+        if hit_dist < f32::new(40.0) {
             let p = ro.add(final_rd.scale(hit_dist));
-            let normal = scene_sdf_normal(p, t_val, b_factor, config);
+            let normal = scene_sdf_normal(p.clone(), t_val, b_factor, config);
             
-            let key_light_pos  = Vec3::new(4.0, 7.0, -4.0);
-            let fill_light_pos = Vec3::new(-5.0, 3.0, -3.0);
-            let rim_light_pos  = Vec3::new(0.0, 6.0, 5.0); 
+            let key_light_pos  = Vec3::new(f32::new(4.0), f32::new(7.0), f32::new(-4.0));
+            let fill_light_pos = Vec3::new(f32::new(-5.0), f32::new(3.0), f32::new(-3.0));
+            let rim_light_pos  = Vec3::new(f32::new(0.0), f32::new(6.0), f32::new(5.0)); 
             
-            let key_dir  = key_light_pos.sub(p).normalize();
-            let fill_dir = fill_light_pos.sub(p).normalize();
-            let rim_dir  = rim_light_pos.sub(p).normalize();
+            let key_dir  = key_light_pos.sub(p.clone()).normalize();
+            let fill_dir = fill_light_pos.sub(p.clone()).normalize();
+            let rim_dir  = rim_light_pos.sub(p.clone()).normalize();
             
-// GEFIXT: Keine Verwendung von f32::max als Typen-Konstrukt.// In CubeCL ruft man die mathematischen Funktionen über die instanziierten Typen-Methoden auf!
-let mut diff_key  = normal.dot(key_dir).max(0.0f32);let diff_fill = normal.dot(fill_dir).max(0.0f32);let diff_rim  = normal.dot(rim_dir).max(0.0f32);if *shadow_mode == 1u32 {let shadow_factor = calculate_soft_shadow(p.add(normal.scale(0.02f32)), key_dir, t_val, b_factor, config);diff_key *= shadow_factor;}let mut ao_factor = 1.0f32;if *enable_ao_mode == 1u32 {ao_factor = calculate_ao(p, normal, t_val, b_factor, config);}let mut key_r = 1.00f32; let mut key_g = 0.95f32; let mut key_b = 0.85f32;let mut fill_r = 0.25f32; let mut fill_g = 0.40f32; let mut fill_b = 0.60f32;let mut rim_r = 0.50f32; let mut rim_g = 0.70f32; let mut rim_b = 1.00f32;if *enable_key == 0u32  { key_r = 0.0; key_g = 0.0; key_b = 0.0; }if *enable_fill == 0u32 { fill_r = 0.0; fill_g = 0.0; fill_b = 0.0; }if *enable_rim == 0u32  { rim_r = 0.0; rim_g = 0.0; rim_b = 0.0; }let mat_r = 0.85f32;let mat_g = 0.82f32;let mat_b = 0.78f32;let l_intensity = *light_intensity;// GEFIXT: f32::powf(...) durch den instanziierten .powf() Aufruf ersetzt, um den Typenfehler im Makro aufzulösen!
-let lit_r = (key_r * diff_key * l_intensity) + (fill_r * diff_fill * 0.7f32) + (rim_r * diff_rim.powf(3.0f32) * 1.5f32);let lit_g = (key_g * diff_key * l_intensity) + (fill_g * diff_fill * 0.7f32) + (rim_g * diff_rim.powf(3.0f32) * 1.5f32);let lit_b = (key_b * diff_key * l_intensity) + (fill_b * diff_fill * 0.7f32) + (rim_b * diff_rim.powf(3.0f32) * 1.5f32);let a_strength = *ambient_strength;let final_r = mat_r * (a_strength * ao_factor + lit_r * ao_factor);let final_g = mat_g * (a_strength * ao_factor + lit_g * ao_factor);let final_b = mat_b * (a_strength * ao_factor + lit_b * ao_factor);let mut fog = (40.0f32 - hit_dist) / (40.0f32 - 15.0f32);if fog > 1.0f32 { fog = 1.0f32; }if fog < 0.0f32 { fog = 0.0f32; }final_color_x = final_r * fog + bg_r * (1.0f32 - fog);final_color_y = final_g * fog + bg_g * (1.0f32 - fog);final_color_z = final_b * fog + bg_b * (1.0f32 - fog);}// GEFIXT: .max() und .min() direkt als Methoden auf den Werten aufrufen statt über den CPU-Pfad f32::max
-let r_u32 = (final_color_x.min(1.0).max(0.0) * 255.0) as u32;
-        let g_u32 = (final_color_y.min(1.0).max(0.0) * 255.0) as u32;
-        let b_u32 = (final_color_z.min(1.0).max(0.0) * 255.0) as u32;
-        let packed_pixel = (r_u32 << 16) | (g_u32 << 8) | b_u32;
+            let mut diff_key  = normal.dot(key_dir).max(f32::new(0.0));
+            let diff_fill = normal.dot(fill_dir).max(f32::new(0.0));
+            let diff_rim  = normal.dot(rim_dir).max(f32::new(0.0));
+            
+            if shadow_mode == u32::new(1) {
+                let offset_p = p.add(normal.scale(f32::new(0.02)));
+                let shadow_factor = calculate_soft_shadow(offset_p, key_dir, t_val, b_factor, config);
+                diff_key *= shadow_factor;
+            }
+            
+            let mut ao_factor = f32::new(1.0);
+            if enable_ao_mode == u32::new(1) {
+                ao_factor = calculate_ao(p, normal, t_val, b_factor, config);
+            }
+            
+            let mut key_r = f32::new(1.00); let mut key_g = f32::new(0.95); let mut key_b = f32::new(0.85);
+            let mut fill_r = f32::new(0.25); let mut fill_g = f32::new(0.40); let mut fill_b = f32::new(0.60);
+            let mut rim_r = f32::new(0.50); let mut rim_g = f32::new(0.70); let mut rim_b = f32::new(1.00);
+            
+            if enable_key == u32::new(0)  { key_r = f32::new(0.0); key_g = f32::new(0.0); key_b = f32::new(0.0); }
+            if enable_fill == u32::new(0) { fill_r = f32::new(0.0); fill_g = f32::new(0.0); fill_b = f32::new(0.0); }
+            if enable_rim == u32::new(0)  { rim_r = f32::new(0.0); rim_g = f32::new(0.0); rim_b = f32::new(0.0); }
+            
+            let mat_r = f32::new(0.85);
+            let mat_g = f32::new(0.82);
+            let mat_b = f32::new(0.78);
+            let l_intensity = light_intensity;
+            
+            let lit_r = (key_r * diff_key * l_intensity) + (fill_r * diff_fill * f32::new(0.7)) + (rim_r * diff_rim.powf(f32::new(3.0)) * f32::new(1.5));
+            let lit_g = (key_g * diff_key * l_intensity) + (fill_g * diff_fill * f32::new(0.7)) + (rim_g * diff_rim.powf(f32::new(3.0)) * f32::new(1.5));
+            let lit_b = (key_b * diff_key * l_intensity) + (fill_b * diff_fill * f32::new(0.7)) + (rim_b * diff_rim.powf(f32::new(3.0)) * f32::new(1.5));
+            
+            let a_strength = ambient_strength;
+            let final_r = mat_r * (a_strength * ao_factor + lit_r * ao_factor);
+            let final_g = mat_g * (a_strength * ao_factor + lit_g * ao_factor);
+            let final_b = mat_b * (a_strength * ao_factor + lit_b * ao_factor);
+            
+            let mut fog = (f32::new(40.0) - hit_dist) / (f32::new(40.0) - f32::new(15.0));
+            if fog > f32::new(1.0) { fog = f32::new(1.0); }
+            if fog < f32::new(0.0) { fog = f32::new(0.0); }
+            
+            final_color_x = final_r * fog + bg_r * (f32::new(1.0) - fog);
+            final_color_y = final_g * fog + bg_g * (f32::new(1.0) - fog);
+            final_color_z = final_b * fog + bg_b * (f32::new(1.0) - fog);
+        }
+
+        let r_u32 = u32::cast_from(final_color_x.min(f32::new(1.0)).max(f32::new(0.0)) * f32::new(255.0));
+        let g_u32 = u32::cast_from(final_color_y.min(f32::new(1.0)).max(f32::new(0.0)) * f32::new(255.0));
+        let b_u32 = u32::cast_from(final_color_z.min(f32::new(1.0)).max(f32::new(0.0)) * f32::new(255.0));
+        let packed_pixel = (r_u32 << u32::new(16)) | (g_u32 << u32::new(8)) | b_u32;
         
         let x_usize = usize::cast_from(x);
         let y_usize = usize::cast_from(y);
-        let width_usize = usize::cast_from(*width);
+        let width_usize = usize::cast_from(width);
         let pixel_index = y_usize * width_usize + x_usize;
+        
+        // Tensor-Schreiben zwingend mit usize indizieren
         output[pixel_index] = packed_pixel;
     }
 }
