@@ -1,160 +1,162 @@
-Technischer Bericht: Dynamischer GPU-Szenengraph via CubeCL (v0.10)
+Architecture Specification & Technical Report: Real-Time Dynamic Raymarching Engine1. Architectural Overview & Design PhilosophyThis document specifies the architecture of a high-performance, real-time Signed Distance Field (SDF) Raymarching Engine implemented in Rust utilizing CubeCL 0.11.0-pre.2.Traditional GPU compute architectures for raymarching typically rely on static code generation or uniform parameter updates bound via explicit hardware bindings. In contrast, this engine implements an Invariant Buffer Layout with Dynamic Payload Streaming architecture. It is designed to allow arbitrary runtime object spawning, real-time mutations, and interactive scene graphs without triggering GPU memory re-allocations or JIT shader recompilations.+--------------------------------------------------------------------------+
 
-**Fokus:** Datenfluss-Architektur, layoutfreie API-Signatur-Bypässe und Zero-Cost-Abstraktion in Compute-Shadern.
+| HOST CPU (Rust Context)                                                  |
+|                                                                          |
+|  [Parallel Vectors] ----> [Interleaved Matrix] ---> [Static VRAM Allocation]
+|  - slot_types             (Array of Structures)     - Width: 401 Floats  
+|  - slot_sizes             (1 Header + 100 * 5)     - Lifecycle: Persistent
 
----
+|  - slot_offsets_x,y,z                                                    |
++--------------------------------------------------------------------+-----+
+                                                                     |
+                                                       client.write  | (Zero-Cost Stream)
+                                                                     v
++--------------------------------------------------------------------+-----+
 
-1. Systemübersicht & Design-Philosophie
+| DEVICE GPU (CubeCL Compute Core)                                         |
+|                                                                          |
+|  [Global Memory Cache] <-------------------------------------------------+
 
-Klassische Grafik-Pipelines nutzen oft komplexe, dynamische Szenengraphen auf der CPU, die baumartig traversiert und über Byte-Buffer (UBOs/SSBOs) an die GPU übertragen werden. In **CubeCL (v0.10)** stoßen voll-dynamische Strukturen auf der GPU zur Laufzeit an Grenzen, da das `#[cube]`-Makro den Rust-Code zur Kompilierzeit statisch analysiert, optimiert und in festen WGSL/SPIR-V Zwischencode übersetzt.
+|   `-- config: &Tensor<f32>` (401 contiguous floats)                      |
+|                                                                          |
+|  [Uniform Thread Scan]                                                   |
+|   `-- u32::cast_from(config[usize::new(0)])` -> Global Dynamic Limit     |
+|                                                                          |
+|  [Spatial Ray Intersection Loop]                                         |
+|   `-- Shared Matrix Repetition Execution Path                           |
++--------------------------------------------------------------------------+
+Core Architecture Trade-offsTo achieve a completely fluid development and production framework ("Space-Lab"), the architecture intentionally balances structural flexibility against ultimate hardware optimization limits:AOT Structural Invariance: All GPU metadata structures (shape, strides, and dispatch sizes) are completely frozen at startup.Payload-Driven Customization: All scene mutations are treated as state updates streamed over the PCIe bus into pre-allocated memory slices, avoiding runtime API layout mutations.Cohesive State Management: Object types, physical bounds, and spatial displacements are bundled sequentially to ensure structural consistency across execution threads.2. Memory Topology & Serialization StrategyThe backend forces a strict AoS (Array of Structures) Interleaved Matrix to track spatial geometry allocations. Global memory buffers represent uniform multi-dimensional states flattened entirely into a sequential 1D GPU memory segment.Matrix Footprint FormulationThe memory topology allocates space for a static maximum ceiling of 100 independent object nodes (MAX_SLOTS = 100), ensuring that physical buffer boundaries never change regardless of the current live scene complexity.                  Index 0: Global Active Frame Length Header
+                                  |
+                                  v
+ raw_config Matrix = [ active_slots_count, 
+                       Type_0, Size_0, OffsetX_0, OffsetY_0, OffsetZ_0,  <-- Slot 0 (5 Floats)
+                       Type_1, Size_1, OffsetX_1, OffsetY_1, OffsetZ_1,  <-- Slot 1 (5 Floats)
+                       ...
+                       Type_n, Size_n, OffsetX_n, OffsetY_n, OffsetZ_n ] <-- Slot 99 (5 Floats)
+Mathematical Stride CalculationThe discrete buffer boundary size is structurally invariant and calculated as follows:\(\text{CONFIG\_BUFFER\_FLOATS}=1+(\text{MAX\_SLOTS}\times 5)=401\text{\ floats}\)Index 0 (Metadata Header): Contains active_slots_count (represented as f32). This tells the shader compiler how many sequential chunks must be physically scanned during the spatial evaluation cycle.Payload Chunk Stride: Each logical slot contains exactly 5 floating-point components. The byte layout offset for any given arbitrary slot identifier (\(i\)) inside the array tracking is calculated via:\(\text{BaseOffset}(i)=1+(i\times 5)\)3. GPU Branching, Divergence, and Execution AnalysisIntegrating a Domain Repetition Framework (Infinite Modulo Grids) with a dynamic loop tracking schema introduces complex wave-front execution properties on modern AMD (RDNA) and Nvidia (RTX) architectures.Uniform Control ScansBecause the root config tensor memory is visually identical across all concurrent fragment evaluation spaces within a given viewport render pass, the outer loop initialization benefits heavily from Uniform Branching. Every SIMD lane within a Warp/Wavefront accesses the identical memory payload and counts up concurrently, maintaining a unified execution pointer.Spatial Branch DivergenceBecause cells are instantiated infinitely via structural modulo operations:\(\text{GridPosition}=P-\text{CellSize}\times \lfloor \frac{P+\text{HalfCell}}{\text{CellSize}}\rfloor \)Threads tracking adjacent pixels cross physical module boundaries in the virtual space. If Thread \(A\) evaluates an active structural node (e.g., a Gyroid, Type 2.0) while adjacent Thread \(B\) within the same Warp maps to a vacant or alternative geometric node (e.g., a Crystal, Type 1.0), Execution Masking occurs:The hardware compute unit temporarily serializes both branch targets.Inactive lanes are masked off during execution block \(A\), then swapped for execution block \(B\).Performance Impact: In regions containing high-frequency scene mixtures, execution throughput scales with the sum of the processed branch costs rather than the maximum path cost.4. CubeCL 0.11 Implementation Summary: Mechanics & Syntax RulesUpgrading from CubeCL 0.10 to 0.11 enforces advanced safety rules, eliminating implicit type inference overhead to maximize compile-time optimizations.I. Pure Device Primitive ConstraintsRaw floating-point or unsigned integer suffix constructions (e.g., 0.0f32, 1u32) are invalid inside a #[cube] expansion layer. Variables must be initialized using modern device-native frontend type constructors.rust// ❌ Invalid CubeCL 0.11 Construction (Triggers Compiler Trait Panic)
+let half_cell = cell_size * 0.5f32; 
 
-Dieses System implementiert eine **tabellenbasierte Baukasten-Architektur**. Statt Objekte zur Laufzeit physisch in den Speicher zu streamen oder Shader-Code dynamisch zu parsen, werden alle verfügbaren Geometrie-Algorithmen statisch in den Shader integriert. Der Zustand und die Komposition der Szene werden über ein hocheffizientes **Primitive-Signatur-Mapping** (Value-Passing über Thread-Argumente) gesteuert.
+// ✅ Correct Type Construction for 0.11 GPU Context
+let half_cell = cell_size * f32::new(0.5);
+Verwende Code mit Vorsicht.II. Rigid Explicit Type CastingImplicit arithmetic type conversion or native Rust keywords (val as f32) are completely rejected by the compiler expansion framework. Conversion calls require explicit casting functions mapped directly to target primitive identifiers.rust// ❌ Invalid Cast
+let uv_x = x as f32;
 
-Die Architektur-Brücke
+// ✅ Valid Casting Context
+let uv_x = f32::cast_from(x);
+Verwende Code mit Vorsicht.III. Restricted Vector & Struct Lifecycles within ClosuresIn CubeCL 0.11, loop statements expand internally into localized execution closures (FnMut). Because advanced user-defined macro representations (such as Vec3Expand) do not natively implement an implicit, unchecked copy pipeline across sub-blocks, accessing a structural parameter within a persistent loop structure consumes its reference, triggering an ownership error (E0507).Variables must be explicitly instantiated or copied via primitive component extraction inside the iteration boundary.rust// ❌ Relies on Implicit Copy (Triggers Use of Moved Value inside Loop)
+let p = ro.add(rd.scale(t));
 
-```
-  [ CPU (Host Thread via Winit) ] 
-        | 
-        |  Ereignis: Tastendruck 1, 2, 3, 4 (Slot-Zustand rotiert 0 -> 1 -> 2)
-        v
-  [ Compute-Launch (WGPU Client Queue) ]
-        | 
-        |  Übergabe: Skalare u32-Parameter (slot1, slot2, slot3, slot4)
-        v
-  [ GPU Kernel (scene_sdf Evaluierung) ]
-        |
-        +---> Evaluierung Slot 1 (Zentrum)   --> smin() / min()
-        +---> Evaluierung Slot 2 (Links)     --> smin() / min()
-        +---> Evaluierung Slot 3 (Rechts)    --> smin() / min()
-        +---> Evaluierung Slot 4 (Hintergrund)--> smin() / min()
-```
+// ✅ Explicit Component Construction to Bypass Closure Constraints
+let current_p = Vec3::new(p.x, p.y, p.z);
+Verwende Code mit Vorsicht.IV. Typed Invariant Tensor IndexingTensor collections no longer accept arbitrary integer indexing patterns (u32). Every device memory address reference requires a strict usize descriptor, ensuring compliance with native 64-bit hardware indexing features.rust// ❌ Invalid Indexing Pattern
+let data = config[u32::new(0)];
 
----
+// ✅ Valid Indexing Specification
+let data = config[usize::new(0)];
+Verwende Code mit Vorsicht.V. Decoupled Spatial Coordinate ConstructionThread blocks are defined using isolated multidimensional coordinate initializers. Thread assignments cannot be bound using explicit instance mutations combined with standard runtime contexts.rust// ❌ Overwrites 3D layout bounds with 1D allocations
+let mut cube_dim = CubeDim::new(&client, 16); 
 
-2. Struktur und Syntax der Implementation
+// ✅ Correct Multidimensional Pre-Allocation API
+let cube_dim = CubeDim::new_3d(16, 4, 1);
+Verwende Code mit Vorsicht.5. Performance Blueprint & Reference ImplementationThis blueprint provides an optimal reference for implementing the complete dynamic payload architecture. It highlights correct memory streaming mechanics and explicit hardware loop wrapping across modules.Custom Component Declaration (src/kernel.rs)rustuse cubecl::prelude::*;
 
-2.1 Modul-Kombination & Datenfluss
+#[derive(Copy, Clone, CubeType)]
+pub struct Vec3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
 
-Die Datenfluss-Kette ist streng hierarchisch aufgebaut. Da Teilsysteme wie Schatten (Ray-Traced Hard/Soft Shadows) und Umgebungsverdeckung (Ambient Occlusion) die Szene an beliebigen Punkten im Raum abfragen müssen, fungiert die Funktion `scene_sdf` als zentrales mathematisches Orakel. Jede Parametererweiterung der Szene muss zwingend durch alle Submodule durchgereicht werden.
+impl Vec3 {
+    pub fn new(x: f32, y: f32, z: f32) -> Self {
+        Vec3 { x, y, z }
+    }
+}
 
-2.2 Syntax-Spezifika in CubeCL
-
-- **Verbot von vorzeitigen `return`-Anweisungen:** Innerhalb des `#[cube]`-Makros führt ein vorzeitiges `return` in konditionalen Zweigen (`if`) zu Compiler-Fehlern. Daten müssen über mutierbare lokale Variablen (`let mut res = ...;`) gesammelt und am Funktionsende implizit zurückgegeben werden.
-- **Explizite Typinferenz bei `.into()`-Konvertierungen:** Host-Arrays, die für `TensorArg::from_raw_parts` genutzt werden, verlieren ohne Inferenz den Typ. Leere Arrays für Strides müssen zwingend als `Vec::<usize>::new().into()` deklarielt werden.
-- **Ganzzahl-Casting für Modulo-Operationen:** Da Fließkomma-Modulo-Operationen (`%`) auf GPUs plattformabhängig zu Instabilitäten neigen, nutzt die Implementierung ein sicheres i32/u32 Bit-Casting, um die Parität (Gerade/Ungerade) der unendlichen Gitterzellen zu bestimmen.
-
----
-
-3. Der Code-Blueprint für den Coding-Agenten
-
-Die folgenden Code-Auszüge zeigen die exakte syntaktische Struktur, die ein nachfolgender AI-Agent direkt lesen und erweitern kann.
-
-3.1 Das mathematische Herzstück: `src/kernel.rs` (Auszug)
-
-rust
-
-```
 #[cube]
-pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, s1: u32, s2: u32, s3: u32, s4: u32) -> f32 {
-    let cell_size = 10.0f32;
-    let half_cell = cell_size * 0.5;
+pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
+    let cell_size = f32::new(10.0);
+    let half_cell = cell_size * f32::new(0.5);
     
-    // Unendliches 3D Space-Folding (Raum-Klonierung)
-    let cell_id_x = f32::floor((p.x + half_cell) / cell_size);
-    let cell_id_z = f32::floor((p.z + half_cell) / cell_size);
-    let grid_p_x = p.x - cell_size * cell_id_x;
-    let grid_p_y = p.y - cell_size * f32::floor((p.y + half_cell) / cell_size); 
-    let grid_p_z = p.z - cell_size * cell_id_z;
+    // Domain Repetition Framework Math
+    let grid_p_x = p.x - cell_size * ((p.x + half_cell) / cell_size).floor();
+    let grid_p_y = p.y - cell_size * ((p.y + half_cell) / cell_size).floor(); 
+    let grid_p_z = p.z - cell_size * ((p.z + half_cell) / cell_size).floor();
+    
     let local_p = Vec3::new(grid_p_x, grid_p_y, grid_p_z);
+    let mut core_system = f32::new(1000.0);
 
-    // Initialisierung des SDF-Abstandsfeldes im Unendlichen
-    let mut core_system = 1000.0f32;
+    // Dynamic Execution Scan Ceiling Bound to Array Length
+    let active_slots = usize::cast_from(config[usize::new(0)]);
 
-    // Evaluierung Slot 1: Zentrum (0.0, 0.0, 0.0)
-    if s1 == 1 { core_system = smin(core_system, evaluate_crystal(local_p, time), blend_factor); }
-    if s1 == 2 { core_system = smin(core_system, evaluate_gyroid(local_p, time), blend_factor); }
+    let mut i = usize::new(0);
+    loop {
+        if i >= usize::new(100) || i >= active_slots {
+            break; 
+        }
 
-    // Evaluierung Slot 2: Links versetzt (-1.8, 0.0, 0.0)
-    let p_slot2 = local_p.sub(Vec3::new(-1.8, 0.0, 0.0));
-    if s2 == 1 { core_system = smin(core_system, evaluate_crystal(p_slot2, time), blend_factor); }
-    if s2 == 2 { core_system = smin(core_system, evaluate_gyroid(p_slot2, time), blend_factor); }
+        // Stride offset computation based on 5-Float specification
+        let base_idx = usize::new(1) + i * usize::new(5);
+        
+        let obj_type  = u32::cast_from(config[base_idx]);
+        let obj_size  = config[base_idx + usize::new(1)];
+        let offset_x  = config[base_idx + usize::new(2)];
+        let offset_y  = config[base_idx + usize::new(3)];
+        let offset_z  = config[base_idx + usize::new(4)];
+        
+        // Component-isolated structural creation to satisfy macro boundaries
+        let p_slot = Vec3::new(local_p.x - offset_x, local_p.y - offset_y, local_p.z - offset_z);
 
-    // Evaluierung Slot 3: Rechts versetzt (1.8, 0.0, 0.0)
-    let p_slot3 = local_p.sub(Vec3::new(1.8, 0.0, 0.0));
-    if s3 == 1 { core_system = smin(core_system, evaluate_crystal(p_slot3, time), blend_factor); }
-    if s3 == 2 { core_system = smin(core_system, evaluate_gyroid(p_slot3, time), blend_factor); }
+        if obj_type == u32::new(1) {
+            core_system = core_system.min(p_slot.x.abs() + p_slot.y.abs() + p_slot.z.abs() - obj_size);
+        }
+        // Additional Type blocks go here...
 
-    // Evaluierung Slot 4: Hintergrund versetzt (0.0, 0.0, 1.8)
-    let p_slot4 = local_p.sub(Vec3::new(0.0, 0.0, 1.8));
-    if s4 == 1 { core_system = smin(core_system, evaluate_crystal(p_slot4, time), blend_factor); }
-    if s4 == 2 { core_system = smin(core_system, evaluate_gyroid(p_slot4, time), blend_factor); }
-
-    // Statische Tempel-Architektur hinzufügen
-    let mut architecture = evaluate_architecture(local_p);
+        i += usize::new(1);
+    }
     
-    // CSG Kombination (Das Minimum fusioniert den Kern mit der Tempelhalle)
-    f32::min(core_system, architecture)
+    core_system
 }
-```
-
-Verwende Code mit Vorsicht.
-
-3.2 Die Pipeline-Verschaltung: `src/shadows.rs` (Auszug)
-
-rust
-
-```
-#[cube]
-pub fn calculate_soft_shadow(
-    p: Vec3, light_dir: Vec3, time: f32, k: f32, blend_factor: f32,
-    s1: u32, s2: u32, s3: u32, s4: u32 // Zwingendes Durchreichen der Steuerung
-) -> f32 {
-    let mut t = 0.15; // Hoher Bias gegen Self-Shadowing Acne an Tempelkanten
-    let mut res = 1.0;
-    // ... Raymarching-Schleife zur Lichtquelle
-    let d = scene_sdf(current_pos, time, blend_factor, s1, s2, s3, s4);
-    // ... Penumbra-Berechnung
-    res.min(1.0).max(0.25) // Harte Kappung bei 0.25 verhindert unnatürliche klumpige Finsternis
+Verwende Code mit Vorsicht.High-Frequency State Streaming Loop (src/main.rs)rust// =========================================================================
+// RENDER LOOP CYCLE - Executed Every Frame 
+// =========================================================================
+if config_dirty {
+    // Instantiate a localized payload array pre-sized to match the static hardware buffer
+    let mut dynamic_raw_config = vec![0.0f32; CONFIG_BUFFER_FLOATS]; // Pre-calculated as 401 Elements
+    
+    // Inject structural headers and payload strings natively
+    dynamic_raw_config[0] = active_slots_count;
+    
+    for i in 0..slot_types.len() {
+        if i >= MAX_SLOTS { break; }
+        let base = 1 + i * 5;
+        dynamic_raw_config[base]     = slot_types[i];
+        dynamic_raw_config[base + 1] = slot_sizes[i];
+        dynamic_raw_config[base + 2] = slot_offsets_x[i];
+        dynamic_raw_config[base + 3] = slot_offsets_y[i];
+        dynamic_raw_config[base + 4] = slot_offsets_z[i];
+    }
+    
+    // Zero-Cost Direct Memory Update Pathway
+    let config_bytes = cubecl::bytes::Bytes::from_elems(dynamic_raw_config);
+    
+    // Modifies existing allocated buffer space directly without reallocation or cache invalidation
+    client.write(&config_handle, config_bytes);
+    
+    config_dirty = false;
 }
-```
 
-Verwende Code mit Vorsicht.
+// Structurally sound 3D grid layout pass
+let cube_dim = CubeDim::new_3d(16, 4, 1);
 
----
-
-4. Technische Leistung & Wirtschaftlichkeit (Zero-Cost Analysis)
-
-Warum ist diese Methode "Zero-Cost"?
-
-1. **Keine dynamischen Speicher-Allokationen:** Es werden keine Arrays oder Vektoren zur Laufzeit auf der GPU erzeugt oder vergrößert. Die Slot-Abfrage basiert auf primitiven Registern (`u32`).
-2. **Keine CPU-GPU-Synchronisationsbarrieren:** Da die Werte direkt als Skalare im Kernel-Launch mitgeschickt werden, entfällt das Schreiben in Uniform-Buffer (UBOs) und das damit verbundene Pipeline-Stalling.
-3. **Perfekte Branch-Prediction der GPU-Hardware:** Moderne GPUs verarbeiten `if`-Abfragen extrem effizient, wenn der Zustand (`s1`, `s2`, etc.) für alle Threads innerhalb eines Warps/Subgroups identisch ist (_Uniform Branching_). Da jeder Pixel auf dem Bildschirm im exakt gleichen Frame die gleiche Szenenkonfiguration nutzt, gibt es keine Divergenz (Branch Divergence) innerhalb der Rechenkerne. Die inaktiven Zweige kosten absolut keine Rechenzeit.
-
----
-
-5. Visionäre Anwendungsfälle (Advanced Use Cases)
-
-Ein nachfolgender Entwicklungs-Agent kann dieses Framework als Fundament für hochkomplexe Systeme nutzen:
-
-5.1 Prozedurales Endlos-RGP (Chunk-basiertes Spawnen)
-
-Anstatt die Slots starr an relative Offsets im Raum zu binden, kann die CPU die Slot-Argumente an die absolute Position des Spielers koppeln. [[1](https://github.com/tracel-ai/cubecl/releases), [2](https://jonngan.medium.com/rust-burn-c-u-m-d49d2a04350e)]
-
-- **Mechanismus:** Wenn der Spieler die Grenze einer unendlichen Zelle überschreitet (`p.x > 8.0`), berechnet Tokio im Hintergrund über einen Seed ein neues prozedurales Muster.
-- **Resultat:** Der Hauptthread füttert die Slot-IDs beim nächsten Launch mit völlig neuen Werten. Für den Nutzer entsteht die optische Illusion einer sich prozedural verändernden unendlichen Welt, obwohl der Shader-Code statisch bleibt.
-
-5.2 Physik-gesteuerte Partikel-Kollision (SDF-to-CPU Feedback)
-
-Da die Slots über einfache IDs gesteuert werden, kann eine separate Tokio-Hintergrund-Task eine einfache CPU-Physikberechnung (z. B. Gravitation oder Kollision) durchführen.
-
-- **Mechanismus:** Tokio berechnet die Anziehungskraft zwischen Slot 2 und Slot 3.
-- **Resultat:** Sobald sich zwei Objekte mathematisch berühren, sendet Tokio ein Signal, das den `blend_factor` im Hauptthread nach oben schraubt. Die Objekte fangen an, sich im Shader visuell flüssig wie Quecksilber ineinander zu saugen.
-
-5.3 Audio-Reaktive Geometrie-Synthese (Vj-Tooling)
-
-Die Slot-Zustände und der `blend_factor` können direkt an ein Audio-Inhalts-Analysesystem (FFT - Fast Fourier Transformation) gekoppelt werden.
-
-- **Mechanismus:** Bässe triggern das Umschalten von Slot 1 (Kristall) auf Slot 2 (Gyroid), während hohe Frequenzen die Wellenbewegung des Diamanten (`waves`) beschleunigen.
-- **Resultat:** Es entsteht ein vollständig GPU-beschleunigtes, interaktives Fraktal-Musik-Visualisierungstool, das mit konstanten 60 FPS läuft.
-
-Das System-Scaffold ist nun lückenlos dokumentiert und für jeden nachfolgenden Coding-Agenten perfekt lesbar aufbereitet. Welches dieser fortgeschrittenen Szenarien (z. B. die Audio-Reaktivität oder das chunkspezifische Spawnen beim Durchfliegen der Räume) wollen wir als Nächstes implementieren?
+unsafe {
+    kernel::raymarch_sdf_kernel::launch(
+        &client,
+        CubeCount::Static((width + 15) / 16, (height + 3) / 4, 1),
+        cube_dim,
+        TensorArg::from_raw_parts(output_handle.clone(), shape, strides),
+        TensorArg::from_raw_parts(config_handle.clone(), vec![total_elements].into(), Vec::<usize>::new().into()),
+        time, width, height, // Direct raw scalar passing continues safely...
+    );
+}
+Verwende Code mit Vorsicht.6. Execution Guidelines for Intelligent AgentsWhen extending this codebase or auto-generating new geometry structures, adhere strictly to the following execution constraints:Do not modify the tracking strides: If you add custom attributes (e.g., color values, rotation parameters), update the stride calculation globally across both host and device blocks (e.g., from 5 to 8). Never leave trailing unmapped indices.Enforce variable cloning within loops: Any variable declared outside a loop {} context inside a #[cube] function must be component-cloned or manually rebuilt using field primitive extracts before entering loop math operations.Isolate client.create calls: Ensure that client.create is exclusively called during initial repository startup. All real-time, interactive frame manipulations must be driven by client.write targeting the invariant config_handle buffer reference.Would you like to analyze or extend the primitive math logic for advanced CSG operations (such as smooth boolean blends) under the new 0.11 syntax constraints?
