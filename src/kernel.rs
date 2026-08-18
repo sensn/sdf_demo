@@ -1,5 +1,36 @@
+#![allow(warnings)]
+
 use cubecl::prelude::*;
 use cubecl::frontend::CubeType;
+
+use cubecl::prelude::*;
+
+#[derive(Copy, Clone, CubeType)]
+#[cube(derive(Copy, Clone))]
+pub struct SdfResult {
+    pub d: f32,
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+}
+
+#[cube]
+pub fn smin_material(a: SdfResult, b: SdfResult, k: f32) -> SdfResult {
+    let h = (k - (a.d - b.d).abs()).max(f32::new(0.0)) / k;
+    
+    // Berechne die interpolierte Distanz
+    let mixed_d = a.d.min(b.d) - h * h * k * f32::new(0.25);
+    
+    // Lineare Farbmischung basierend auf der Nähe zum jeweiligen Objekt
+    // Wenn h nah an 1 ist, befinden wir uns in der Übergangszone
+    let mix_factor = (f32::new(0.5) + f32::new(0.5) * (b.d - a.d) / k).min(f32::new(1.0)).max(f32::new(0.0));
+    
+    let mixed_r = a.r + mix_factor * (b.r - a.r);
+    let mixed_g = a.g + mix_factor * (b.g - a.g);
+    let mixed_b = a.b + mix_factor * (b.b - a.b);
+    
+    SdfResult { d: mixed_d, r: mixed_r, g: mixed_g, b: mixed_b }
+}
 
 
 // 1. Zuerst die normalen Rust-Derives
@@ -104,9 +135,14 @@ pub fn evaluate_dynamic_torus(p: Vec3, time: f32, size: f32) -> f32 {
     (q_x * q_x + rx_y * rx_y).sqrt() - r_minor
 }
 
-
 #[cube]
-pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
+pub fn scene_sdf(
+    p: Vec3, 
+    time: f32, 
+    blend_factor: f32, 
+    meta: &Tensor<f32>, 
+    slots: &Tensor<f32>
+) -> SdfResult {
     let cell_size = f32::new(10.0);
     let half_cell = cell_size * f32::new(0.5);
     
@@ -115,44 +151,81 @@ pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) ->
     let grid_p_z = p.z - cell_size * ((p.z + half_cell) / cell_size).floor();
     
     let local_p = Vec3::new(grid_p_x, grid_p_y, grid_p_z);
-    let mut core_system = f32::new(1000.0);
+    
+    // Wir tracken die reine, weich verschmolzene Distanz separat
+    let mut min_dist = f32::new(1000.0);
+    
+    // Akkumulatoren für die gewichtete Farbmischung
+    let mut sum_r = f32::new(0.0);
+    let mut sum_g = f32::new(0.0);
+    let mut sum_b = f32::new(0.0);
+    let mut sum_w = f32::new(0.0); // Gesamtgewichtung
 
-    let active_slots = usize::cast_from(config[usize::new(0)]);
+    let active_slots = usize::cast_from(meta[usize::new(0)]);
 
-    // Der Schleifenzähler läuft nun als usize
     let mut i = usize::new(0);
     loop {
         if i >= usize::new(100) || i >= active_slots {
             break; 
         }
 
-        // Alle Berechnungen für Tensor-Indizes sauber in usize
-                // In src/kernel.rs -> innerhalb der loop-Schleife:
-        let base_idx = usize::new(1) + i * usize::new(5); // Von 4 auf 5 geändert!
-        
-        let obj_type  = u32::cast_from(config[base_idx]);
-        let obj_size  = config[base_idx + usize::new(1)];
-        let offset_x  = config[base_idx + usize::new(2)];
-        let offset_y  = config[base_idx + usize::new(3)]; // NEU auf der GPU!
-        let offset_z  = config[base_idx + usize::new(4)];
-        
-        // Lokalen Raum berechnen inklusive der neuen Y-Höhe
-        let p_slot = Vec3::new(local_p.x - offset_x, local_p.y - offset_y, local_p.z - offset_z);
+        let base_idx = i * usize::new(8);
+        let obj_type = u32::cast_from(slots[base_idx]);
 
+        if obj_type > u32::new(0) {
+            let obj_size  = slots[base_idx + usize::new(1)];
+            let offset_x  = slots[base_idx + usize::new(2)];
+            let offset_y  = slots[base_idx + usize::new(3)]; 
+            let offset_z  = slots[base_idx + usize::new(4)];
+            let obj_r     = slots[base_idx + usize::new(5)]; 
+            let obj_g     = slots[base_idx + usize::new(6)]; 
+            let obj_b     = slots[base_idx + usize::new(7)]; 
+            
+            let p_slot = Vec3::new(local_p.x - offset_x, local_p.y - offset_y, local_p.z - offset_z);
 
-        if obj_type == u32::new(1) {
-            core_system = smin(core_system, evaluate_dynamic_crystal(p_slot, time, obj_size), blend_factor);
-        }
-        if obj_type == u32::new(2) {
-            core_system = smin(core_system, evaluate_dynamic_gyroid(p_slot, time, obj_size), blend_factor);
-        }
-        if obj_type == u32::new(3) {
-            core_system = smin(core_system, evaluate_dynamic_torus(p_slot, time, obj_size), blend_factor);
+            let mut d_obj = f32::new(1000.0);
+            if obj_type == u32::new(1) { d_obj = evaluate_dynamic_crystal(p_slot, time, obj_size); }
+            if obj_type == u32::new(2) { d_obj = evaluate_dynamic_gyroid(p_slot, time, obj_size); }
+            if obj_type == u32::new(3) { d_obj = evaluate_dynamic_torus(p_slot, time, obj_size); }
+
+            // 1. Geometrische Verschmelzung (Polynomials Minimum)
+            if min_dist > f32::new(999.0) {
+                min_dist = d_obj;
+            } else {
+                let h = (blend_factor - (min_dist - d_obj).abs()).max(f32::new(0.0)) / blend_factor;
+                min_dist = min_dist.min(d_obj) - h * h * blend_factor * f32::new(0.25);
+            }
+
+            // 2. 🟢 DER REVOLUTIONÄRE FARBMISCHER: Gewichtung basierend auf der Nähe zum Objekt
+            // Je näher der Strahl am Objekt ist, desto kleiner ist d_obj, desto exponentiell höher das Gewicht!
+            // Wir nutzen eine weiche Abfallkurve (Smooth Blend Weight)
+            let w = f32::new(1.0) / (d_obj.max(f32::new(0.001))).powf(f32::new(2.0));
+            
+            sum_r += obj_r * w;
+            sum_g += obj_g * w;
+            sum_b += obj_b * w;
+            sum_w += w;
         }
 
-         i += usize::new(1);
+        i += usize::new(1);
     }
 
+    // Berechne die finale Objektfarbe aus der Normalisierung
+    let mut core_r = f32::new(1.0);
+    let mut core_g = f32::new(1.0);
+    let mut core_b = f32::new(1.0);
+
+    if sum_w > f32::new(0.0) {
+        core_r = sum_r / sum_w;
+        core_g = sum_g / sum_w;
+        core_b = sum_b / sum_w;
+    }
+
+    let core_system = SdfResult { d: min_dist, r: core_r, g: core_g, b: core_b };
+
+    // =========================================================================
+    // ARCHITEKTUR-GENERIERUNG (Unverändert starr, Farbe: Steingrau 0.7)
+    // =========================================================================
     let pillar_x = (local_p.x.abs() - f32::new(5.0)).abs() - f32::new(0.6);
     let pillar_z = (local_p.z.abs() - f32::new(5.0)).abs() - f32::new(0.6);
     let corner_pillars = pillar_x.max(pillar_z);
@@ -166,42 +239,72 @@ pub fn scene_sdf(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) ->
     let arch_x = (local_p.z * local_p.z + (local_p.y - f32::new(1.0)) * (local_p.y - f32::new(1.0))).sqrt() - arch_radius;
     let wall_arches = arch_z.min(arch_x);
 
-    let mut architecture = corner_pillars.min(floor_and_ceiling);
-    architecture = architecture.max(-wall_arches);
+    let mut arch_d = corner_pillars.min(floor_and_ceiling);
+    arch_d = arch_d.max(-wall_arches);
 
     let s1_decor = f32::new(2.0);
     let pillar_holes = ( (local_p.x * s1_decor).sin().abs() + (local_p.y * s1_decor).cos().abs() + (local_p.z * s1_decor).sin().abs() ) * f32::new(0.03);
-    architecture = architecture.max(-(pillar_holes - f32::new(0.01)));
+    arch_d = arch_d.max(-(pillar_holes - f32::new(0.01)));
 
-    let combined_core = smin(core_system, architecture, blend_factor);
-    
-    let mut final_res = core_system.min(architecture);
-    if blend_factor > f32::new(10.0) {
-        final_res = smin(combined_core, architecture, f32::new(0.7)) - f32::new(0.1);
+    let architecture = SdfResult {
+        d: arch_d,
+        r: f32::new(0.7),
+        g: f32::new(0.7),
+        b: f32::new(0.7),
+    };
+
+    // =========================================================================
+    // FINALE REINE SCHNITTAUSWERTUNG 
+    // =========================================================================
+    let mut final_d = f32::new(1000.0);
+    let mut final_r = f32::new(1.0);
+    let mut final_g = f32::new(1.0);
+    let mut final_b = f32::new(1.0);
+
+    let check_core = core_system.clone();
+    let check_arch = architecture.clone();
+
+    if check_core.d < check_arch.d { 
+        final_d = check_core.d;
+        final_r = check_core.r;
+        final_g = check_core.g;
+        final_b = check_core.b;
+    } else { 
+        final_d = check_arch.d;
+        final_r = check_arch.r;
+        final_g = check_arch.g;
+        final_b = check_arch.b;
     }
     
-    final_res
+    SdfResult { d: final_d, r: final_r, g: final_g, b: final_b }
 }
-
 #[cube]
-pub fn scene_sdf_normal(p: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> Vec3 {
+pub fn scene_sdf_normal(p: Vec3, time: f32, blend_factor: f32, meta: &Tensor<f32>, slots: &Tensor<f32>) -> Vec3 {
     let eps = f32::new(0.002);
-    let d = scene_sdf(p, time, blend_factor, config);
     
-    // Fix: Zuweisung zu separaten Variablen vor Funktionsübergabe
+    let d_res = scene_sdf(p.clone(), time, blend_factor, meta, slots);
+    let d = d_res.d;
+    
     let p_x = Vec3::new(p.x + eps, p.y, p.z);
     let p_y = Vec3::new(p.x, p.y + eps, p.z);
     let p_z = Vec3::new(p.x, p.y, p.z + eps);
 
-    let nx = scene_sdf(p_x, time, blend_factor, config) - d;
-    let ny = scene_sdf(p_y, time, blend_factor, config) - d;
-    let nz = scene_sdf(p_z, time, blend_factor, config) - d;
+    let nx = scene_sdf(p_x, time, blend_factor, meta, slots).d - d;
+    let ny = scene_sdf(p_y, time, blend_factor, meta, slots).d - d;
+    let nz = scene_sdf(p_z, time, blend_factor, meta, slots).d - d;
     
     Vec3::new(nx, ny, nz).normalize()
 }
 
 #[cube]
-pub fn calculate_soft_shadow(ro: Vec3, rd: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
+pub fn calculate_soft_shadow(
+    ro: Vec3, 
+    rd: Vec3, 
+    time: f32, 
+    blend_factor: f32, 
+    meta: &Tensor<f32>, 
+    slots: &Tensor<f32>
+) -> f32 {
     let mut res = f32::new(1.0);
     let mut t = f32::new(0.04); 
     let t_max = f32::new(25.0);
@@ -212,8 +315,13 @@ pub fn calculate_soft_shadow(ro: Vec3, rd: Vec3, time: f32, blend_factor: f32, c
             break;
         }
 
-        let p = ro.add(rd.scale(t));
-        let h = scene_sdf(p, time, blend_factor, config);
+        let current_ro = ro.clone();
+        let current_rd = rd.clone();
+        let p = current_ro.add(current_rd.scale(t));
+        
+        let sdf_res = scene_sdf(p, time, blend_factor, meta, slots);
+        let h = sdf_res.d;
+        
         if h < f32::new(0.001) {
             res = f32::new(0.0);
             break;
@@ -226,11 +334,19 @@ pub fn calculate_soft_shadow(ro: Vec3, rd: Vec3, time: f32, blend_factor: f32, c
 
         step += u32::new(1);
     }
+
     res.max(f32::new(0.2))
 }
 
 #[cube]
-pub fn calculate_ao(p: Vec3, normal: Vec3, time: f32, blend_factor: f32, config: &Tensor<f32>) -> f32 {
+pub fn calculate_ao(
+    p: Vec3, 
+    normal: Vec3, 
+    time: f32, 
+    blend_factor: f32, 
+    meta: &Tensor<f32>, 
+    slots: &Tensor<f32>
+) -> f32 { // 🟢 FIX: Hier fehlte die öffnende Klammer!
     let mut occ = f32::new(0.0);
     let mut sca = f32::new(1.0);
     
@@ -240,22 +356,32 @@ pub fn calculate_ao(p: Vec3, normal: Vec3, time: f32, blend_factor: f32, config:
             break;
         }
 
+        let current_p = p.clone();
+        let current_normal = normal.clone();
+
         let hr = f32::cast_from(i) * f32::new(0.15);
-        let ao_pos = p.add(normal.scale(hr));
-        let dd = scene_sdf(ao_pos, time, blend_factor, config);
+        let ao_pos = current_p.add(current_normal.scale(hr));
+        
+        // 🟢 FIX: Nutzen der neuen 2-Tensor-Signatur (meta, slots) statt config
+        let sdf_res = scene_sdf(ao_pos, time, blend_factor, meta, slots);
+        let dd = sdf_res.d;
+        
         occ += (hr - dd) * sca;
         sca *= f32::new(0.90);
 
         i += u32::new(1);
     }
-(f32::new(1.0) - (occ * f32::new(0.5))).max(f32::new(0.3))
-
+    
+    // 🟢 FIX: Rückgabewert vervollständigt
+    (f32::new(1.0) - (occ * f32::new(0.5))).max(f32::new(0.3))
 }
+
 
 #[cube(launch)]
 pub fn raymarch_sdf_kernel(
     output: &mut Tensor<u32>,
-    config: &Tensor<f32>, 
+    meta: &Tensor<f32>,   // 🟢 REPARIERT: Eindeutiger Metadaten-Tensor
+    slots: &Tensor<f32>,  // 🟢 REPARIERT: Ausgerichteter Geometrie-Tensor
     time: f32,
     width: u32,
     height: u32,
@@ -276,7 +402,6 @@ pub fn raymarch_sdf_kernel(
     let x = ABSOLUTE_POS_X;
     let y = ABSOLUTE_POS_Y;
 
-    // In 0.11 werden Primitiv-Argumente direkt als Kopie übergeben (keine Dereferenzierung `*` nötig)
     let w_val = width;
     let h_val = height;
     let t_val = time;
@@ -309,24 +434,36 @@ pub fn raymarch_sdf_kernel(
         let mut t = f32::new(0.1);
         let mut hit_dist = f32::new(100.0);
         
-        // FIX: loop-Konstrukt statt for-Schleife wegen FnMut/Closure-Eigenschaften in 0.11
+        let mut hit_d = f32::new(1000.0);
+        let mut hit_r = f32::new(0.0);
+        let mut hit_g = f32::new(0.0);
+        let mut hit_b = f32::new(0.0);
+        
         let mut ray_step = u32::new(0);
         loop {
             if ray_step >= u32::new(100) {
                 break;
             }
             
-            // FIX: Variablen-Klone für die Closure sichern
             let current_ro = ro.clone();
             let current_rd = final_rd.clone();
 
             let p = current_ro.add(current_rd.scale(t));
-            let d = scene_sdf(p, t_val, b_factor, config);
-            if d < f32::new(0.001) {
+            
+            // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an scene_sdf
+            let step_res = scene_sdf(p, t_val, b_factor, meta, slots);
+            
+            hit_d = step_res.d;
+            hit_r = step_res.r;
+            hit_g = step_res.g;
+            hit_b = step_res.b;
+            
+            if hit_d < f32::new(0.001) {
                 hit_dist = t;
                 break;
             }
-            t += d;
+            t += hit_d;
+            
             if t > f32::new(40.0) { 
                 break; 
             }
@@ -343,7 +480,8 @@ pub fn raymarch_sdf_kernel(
 
         if hit_dist < f32::new(40.0) {
             let p = ro.add(final_rd.scale(hit_dist));
-            let normal = scene_sdf_normal(p.clone(), t_val, b_factor, config);
+            // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an die Normalenberechnung
+            let normal = scene_sdf_normal(p.clone(), t_val, b_factor, meta, slots);
             
             let key_light_pos  = Vec3::new(f32::new(4.0), f32::new(7.0), f32::new(-4.0));
             let fill_light_pos = Vec3::new(f32::new(-5.0), f32::new(3.0), f32::new(-3.0));
@@ -359,13 +497,15 @@ pub fn raymarch_sdf_kernel(
             
             if shadow_mode == u32::new(1) {
                 let offset_p = p.add(normal.scale(f32::new(0.02)));
-                let shadow_factor = calculate_soft_shadow(offset_p, key_dir, t_val, b_factor, config);
+                // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an die Schattenberechnung
+                let shadow_factor = calculate_soft_shadow(offset_p, key_dir, t_val, b_factor, meta, slots);
                 diff_key *= shadow_factor;
             }
             
             let mut ao_factor = f32::new(1.0);
             if enable_ao_mode == u32::new(1) {
-                ao_factor = calculate_ao(p, normal, t_val, b_factor, config);
+                // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an Ambient Occlusion
+                ao_factor = calculate_ao(p, normal, t_val, b_factor, meta, slots);
             }
             
             let mut key_r = f32::new(1.00); let mut key_g = f32::new(0.95); let mut key_b = f32::new(0.85);
@@ -376,9 +516,10 @@ pub fn raymarch_sdf_kernel(
             if enable_fill == u32::new(0) { fill_r = f32::new(0.0); fill_g = f32::new(0.0); fill_b = f32::new(0.0); }
             if enable_rim == u32::new(0)  { rim_r = f32::new(0.0); rim_g = f32::new(0.0); rim_b = f32::new(0.0); }
             
-            let mat_r = f32::new(0.85);
-            let mat_g = f32::new(0.82);
-            let mat_b = f32::new(0.78);
+            let mat_r = hit_r;
+            let mat_g = hit_g;
+            let mat_b = hit_b;
+            
             let l_intensity = light_intensity;
             
             let lit_r = (key_r * diff_key * l_intensity) + (fill_r * diff_fill * f32::new(0.7)) + (rim_r * diff_rim.powf(f32::new(3.0)) * f32::new(1.5));
@@ -409,7 +550,8 @@ pub fn raymarch_sdf_kernel(
         let width_usize = usize::cast_from(width);
         let pixel_index = y_usize * width_usize + x_usize;
         
-        // Tensor-Schreiben zwingend mit usize indizieren
         output[pixel_index] = packed_pixel;
     }
 }
+
+
