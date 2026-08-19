@@ -74,10 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let device = Default::default();
-    //let client = WgpuRuntime::client(&device); // 0.10
-    //let client = WgpuRuntime::client::<AutoCompiler>(&device); //0.11.0-pre.2
-    // Specifying the compiler generic directly on WgpuRuntime or letting type inference handle it:
-// Wir geben dem Compiler den konkreten Typ vor, damit er weiß, dass AutoCompiler genutzt wird
+ // Wir geben dem Compiler den konkreten Typ vor, damit er weiß, dass AutoCompiler genutzt wird
 let client: ComputeClient<cubecl::wgpu::WgpuRuntime<AutoCompiler>> = 
     cubecl::wgpu::WgpuRuntime::client(&device);
 
@@ -151,6 +148,30 @@ let client: ComputeClient<cubecl::wgpu::WgpuRuntime<AutoCompiler>> =
     
     // Das Handle besitzt ab jetzt für immer invarianten Platz für bis zu 100 Slots
     let slots_handle = client.create(cubecl::bytes::Bytes::from_elems(initial_slots));
+//--------------PBR-MAT-INIT------
+    // CPU-Vektoren für die physikalischen Materialien (PBR)
+    let mut slot_roughness = vec![0.2f32, 0.5f32, 0.1f32, 0.5f32, 0.5f32]; // Slot 1: Sehr glatt/glänzend
+    let mut slot_metallic  = vec![1.0f32, 0.0f32, 0.8f32, 0.0f32, 0.0f32]; // Slot 1: Vollmetallisch
+    let mut slot_emissive  = vec![0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32];
+    let mut slot_specular  = vec![1.0f32, 0.5f32, 1.0f32, 0.5f32, 0.5f32];
+
+    const TOTAL_MATERIAL_FLOATS: usize = MAX_SLOTS * 4; // Starr 400 Floats Platz für PBR-Werte
+
+    // Initialen Puffer mit Nullen befüllen und einmalig allozieren
+        // ✅ SAUBERER FIX: Nutzt den korrekten Vektornamen für das Material-Feld
+    let mut initial_materials = vec![0.0f32; TOTAL_MATERIAL_FLOATS];
+    for i in 0..slot_types.len() {
+        let base = i * 4; 
+        initial_materials[base]     = slot_roughness[i];
+        initial_materials[base + 1] = slot_metallic[i];
+        initial_materials[base + 2] = slot_emissive[i];
+        initial_materials[base + 3] = slot_specular[i];
+    }
+    let materials_handle = client.create(cubecl::bytes::Bytes::from_elems(initial_materials));
+
+//________________________________
+
+
 
     // BEHOBEN: Alle Felder werden direkt innerhalb des Struct-Initialisierers auf false gesetzt!
     let mut keys = KeyboardState {
@@ -377,7 +398,7 @@ let client: ComputeClient<cubecl::wgpu::WgpuRuntime<AutoCompiler>> =
                     let current_len = slot_types.len() as f32;
                     let meta_raw = vec![current_len];
                     client.write(&meta_handle, cubecl::bytes::Bytes::from_elems(meta_raw));
-
+                     // 1. Geometrie & Farbe streamen (Unverändert, Stride 8)
                     // Puffer B aktualisieren: Lokales Feld mit der starren Maximalgröße von 800 Floats befüllen
                     let mut dynamic_slots = vec![0.0f32; TOTAL_SLOT_FLOATS];
                     
@@ -398,7 +419,18 @@ let client: ComputeClient<cubecl::wgpu::WgpuRuntime<AutoCompiler>> =
                     // Schreibt die fixen 800 Floats direkt in den Slice
                     let slots_bytes = cubecl::bytes::Bytes::from_elems(dynamic_slots);
                     client.write(&slots_handle, slots_bytes);
-                    
+                    // 2. 🟢 NEU: PBR-Materialien starr im 4er-Schritt streamen
+                    let mut dynamic_materials = vec![0.0f32; TOTAL_MATERIAL_FLOATS];
+                    for i in 0..slot_types.len() {
+                        if i >= MAX_SLOTS { break; }
+                        let base = i * 4;
+                        dynamic_materials[base]     = slot_roughness[i];
+                        dynamic_materials[base + 1] = slot_metallic[i];
+                        dynamic_materials[base + 2] = slot_emissive[i];
+                        dynamic_materials[base + 3] = slot_specular[i];
+                    }
+                    client.write(&materials_handle, cubecl::bytes::Bytes::from_elems(dynamic_materials));
+                    //---------------
                     config_dirty = false;
                     println!("[Engine] GPU-Speicher via client.write synchronisiert. Aktive Slots im Scope: {}", current_len);
                 }
@@ -416,6 +448,9 @@ let client: ComputeClient<cubecl::wgpu::WgpuRuntime<AutoCompiler>> =
         // Der slots-Tensor enthält die festen 800 Elemente für dein Objektraster
         let slots_shape: Vec<usize> = vec![TOTAL_SLOT_FLOATS]; // 800 Elements
         let slots_strides: Vec<usize> = Vec::<usize>::new();
+        //------PBR-MATERIAL--Tensor
+        let materials_shape: Vec<usize> = vec![TOTAL_MATERIAL_FLOATS];
+        let materials_strides: Vec<usize> = Vec::<usize>::new();
 
         // Der output-Tensor für deine Pixel-Daten
         let shape: Vec<usize> = vec![total_pixels];
@@ -437,6 +472,8 @@ let cube_dim = CubeDim::new_3d(16, 4, 1);
                 TensorArg::from_raw_parts(output_handle.clone(), shape.into(), strides.into()),
                 TensorArg::from_raw_parts(meta_handle.clone(), meta_shape.into(), meta_strides.into()),
                 TensorArg::from_raw_parts(slots_handle.clone(), slots_shape.into(), slots_strides.into()),
+                // 🟢 HIER: Der dritte Tensor wird in die Pipeline injiziert
+                TensorArg::from_raw_parts(materials_handle.clone(), materials_shape.into(), materials_strides.into()),
                 
                 time, 
         width, 

@@ -12,6 +12,11 @@ pub struct SdfResult {
     pub r: f32,
     pub g: f32,
     pub b: f32,
+    // 🟢 NEU: Physikalische Oberflächen-Eigenschaften
+    pub roughness: f32,
+    pub metallic: f32,
+    pub emissive: f32,
+    pub specular: f32,
 }
 
 #[cube]
@@ -28,10 +33,23 @@ pub fn smin_material(a: SdfResult, b: SdfResult, k: f32) -> SdfResult {
     let mixed_r = a.r + mix_factor * (b.r - a.r);
     let mixed_g = a.g + mix_factor * (b.g - a.g);
     let mixed_b = a.b + mix_factor * (b.b - a.b);
+     // 🟢 NEU: Weiches Überblenden der PBR-Materialien in der Mischzone!
+    let mixed_rough = a.roughness + mix_factor * (b.roughness - a.roughness);
+    let mixed_metal = a.metallic + mix_factor * (b.metallic - a.metallic);
+    let mixed_emiss = a.emissive + mix_factor * (b.emissive - a.emissive);
+    let mixed_spec  = a.specular + mix_factor * (b.specular - a.specular);
     
-    SdfResult { d: mixed_d, r: mixed_r, g: mixed_g, b: mixed_b }
+    SdfResult { 
+        d: mixed_d, 
+        r: mixed_r, 
+        g: mixed_g, 
+        b: mixed_b,
+        roughness: mixed_rough,
+        metallic: mixed_metal,
+        emissive: mixed_emiss,
+        specular: mixed_spec
+    }
 }
-
 
 // 1. Zuerst die normalen Rust-Derives
 #[derive(CubeType, Copy, Clone)]
@@ -141,7 +159,8 @@ pub fn scene_sdf(
     time: f32, 
     blend_factor: f32, 
     meta: &Tensor<f32>, 
-    slots: &Tensor<f32>
+    slots: &Tensor<f32>,
+    materials: &Tensor<f32> // 🟢 Dritter Tensor empfangen
 ) -> SdfResult {
     let cell_size = f32::new(10.0);
     let half_cell = cell_size * f32::new(0.5);
@@ -155,10 +174,13 @@ pub fn scene_sdf(
     // Wir tracken die reine, weich verschmolzene Distanz separat
     let mut min_dist = f32::new(1000.0);
     
-    // Akkumulatoren für die gewichtete Farbmischung
+    // Akkumulatoren für die gewichtete Farbmischung UND PBR-Materialien
     let mut sum_r = f32::new(0.0);
     let mut sum_g = f32::new(0.0);
     let mut sum_b = f32::new(0.0);
+    //🟢 New PBR Akkulumatoren
+    let mut sum_rough = f32::new(0.0); let mut sum_metal = f32::new(0.0);
+    let mut sum_emiss = f32::new(0.0); let mut sum_spec  = f32::new(0.0);
     let mut sum_w = f32::new(0.0); // Gesamtgewichtung
 
     let active_slots = usize::cast_from(meta[usize::new(0)]);
@@ -169,7 +191,7 @@ pub fn scene_sdf(
             break; 
         }
 
-        let base_idx = i * usize::new(8);
+        let base_idx = i * usize::new(8); // Starr 8er Stride für Geometrie
         let obj_type = u32::cast_from(slots[base_idx]);
 
         if obj_type > u32::new(0) {
@@ -181,14 +203,27 @@ pub fn scene_sdf(
             let obj_g     = slots[base_idx + usize::new(6)]; 
             let obj_b     = slots[base_idx + usize::new(7)]; 
             
-            let p_slot = Vec3::new(local_p.x - offset_x, local_p.y - offset_y, local_p.z - offset_z);
+            // 🟢 Auslesen aus dem dritten Tensor (Materialien nutzen Stride 4!)
+            let mat_idx  = i * usize::new(4);
+            let obj_rough = materials[mat_idx];
+            let obj_metal = materials[mat_idx + usize::new(1)];
+            let obj_emiss = materials[mat_idx + usize::new(2)];
+            let obj_spec  = materials[mat_idx + usize::new(3)];
+
+            let shifted_p_x = p.x - offset_x;
+            let shifted_p_y = p.y - offset_y;
+            let shifted_p_z = p.z - offset_z;
+
+            let grid_p_x = shifted_p_x - cell_size * ((shifted_p_x + half_cell) / cell_size).floor();
+            let grid_p_y = shifted_p_y - cell_size * ((shifted_p_y + half_cell) / cell_size).floor(); 
+            let grid_p_z = shifted_p_z - cell_size * ((shifted_p_z + half_cell) / cell_size).floor();
+            let p_slot = Vec3::new(grid_p_x, grid_p_y, grid_p_z);
 
             let mut d_obj = f32::new(1000.0);
             if obj_type == u32::new(1) { d_obj = evaluate_dynamic_crystal(p_slot, time, obj_size); }
             if obj_type == u32::new(2) { d_obj = evaluate_dynamic_gyroid(p_slot, time, obj_size); }
             if obj_type == u32::new(3) { d_obj = evaluate_dynamic_torus(p_slot, time, obj_size); }
 
-            // 1. Geometrische Verschmelzung (Polynomials Minimum)
             if min_dist > f32::new(999.0) {
                 min_dist = d_obj;
             } else {
@@ -196,32 +231,29 @@ pub fn scene_sdf(
                 min_dist = min_dist.min(d_obj) - h * h * blend_factor * f32::new(0.25);
             }
 
-            // 2. 🟢 DER REVOLUTIONÄRE FARBMISCHER: Gewichtung basierend auf der Nähe zum Objekt
-            // Je näher der Strahl am Objekt ist, desto kleiner ist d_obj, desto exponentiell höher das Gewicht!
-            // Wir nutzen eine weiche Abfallkurve (Smooth Blend Weight)
+            // Unzerstörbarer, gewichteter Akkumulator für physikalische Eigenschaften
             let w = f32::new(1.0) / (d_obj.max(f32::new(0.001))).powf(f32::new(2.0));
-            
-            sum_r += obj_r * w;
-            sum_g += obj_g * w;
-            sum_b += obj_b * w;
-            sum_w += w;
+            sum_r     += obj_r * w;     sum_g     += obj_g * w;     sum_b     += obj_b * w;
+            sum_rough += obj_rough * w; sum_metal += obj_metal * w;
+            sum_emiss += obj_emiss * w; sum_spec  += obj_spec * w;
+            sum_w     += w;
         }
-
         i += usize::new(1);
     }
 
-    // Berechne die finale Objektfarbe aus der Normalisierung
-    let mut core_r = f32::new(1.0);
-    let mut core_g = f32::new(1.0);
-    let mut core_b = f32::new(1.0);
+    let mut core_r = f32::new(1.0); let mut core_g = f32::new(1.0); let mut core_b = f32::new(1.0);
+    let mut core_rough = f32::new(0.5); let mut core_metal = f32::new(0.0);
+    let mut core_emiss = f32::new(0.0); let mut core_spec  = f32::new(0.5);
 
     if sum_w > f32::new(0.0) {
-        core_r = sum_r / sum_w;
-        core_g = sum_g / sum_w;
-        core_b = sum_b / sum_w;
+        core_r = sum_r / sum_w; core_g = sum_g / sum_w; core_b = sum_b / sum_w;
+        core_rough = sum_rough / sum_w; core_metal = sum_metal / sum_w;
+        core_emiss = sum_emiss / sum_w; core_spec = sum_spec / sum_w;
     }
-
-    let core_system = SdfResult { d: min_dist, r: core_r, g: core_g, b: core_b };
+    let core_system = SdfResult { 
+        d: min_dist, r: core_r, g: core_g, b: core_b,
+        roughness: core_rough, metallic: core_metal, emissive: core_emiss, specular: core_spec
+    };
 
     // =========================================================================
     // ARCHITEKTUR-GENERIERUNG (Unverändert starr, Farbe: Steingrau 0.7)
@@ -246,65 +278,80 @@ pub fn scene_sdf(
     let pillar_holes = ( (local_p.x * s1_decor).sin().abs() + (local_p.y * s1_decor).cos().abs() + (local_p.z * s1_decor).sin().abs() ) * f32::new(0.03);
     arch_d = arch_d.max(-(pillar_holes - f32::new(0.01)));
 
-    let architecture = SdfResult {
-        d: arch_d,
-        r: f32::new(0.7),
-        g: f32::new(0.7),
-        b: f32::new(0.7),
+    // (Starre Raumarchitektur erhält Standard-PBR-Werte: Mattstein = roughness 0.8, metallic 0.0)
+    let architecture = SdfResult { 
+        d: arch_d, r: f32::new(0.7), g: f32::new(0.7), b: f32::new(0.7),
+        roughness: f32::new(0.8), metallic: f32::new(0.0), emissive: f32::new(0.0), specular: f32::new(0.2)
     };
 
+        // =========================================================================
+    // FINALE REINE SCHNITTAUSWERTUNG (Muss zwingend auf primitiver Ebene erfolgen!)
     // =========================================================================
-    // FINALE REINE SCHNITTAUSWERTUNG 
-    // =========================================================================
-    let mut final_d = f32::new(1000.0);
-    let mut final_r = f32::new(1.0);
-    let mut final_g = f32::new(1.0);
-    let mut final_b = f32::new(1.0);
+    let mut final_d     = f32::new(1000.0);
+    let mut final_r     = f32::new(1.0);
+    let mut final_g     = f32::new(1.0);
+    let mut final_b     = f32::new(1.0);
+    
+    // 🟢 NEU: Primitive Register für die PBR-Materialien anlegen
+    let mut final_rough = f32::new(0.5);
+    let mut final_metal = f32::new(0.0);
+    let mut final_emiss = f32::new(0.0);
+    let mut final_spec  = f32::new(0.5);
 
     let check_core = core_system.clone();
     let check_arch = architecture.clone();
 
     if check_core.d < check_arch.d { 
-        final_d = check_core.d;
-        final_r = check_core.r;
-        final_g = check_core.g;
-        final_b = check_core.b;
+        final_d     = check_core.d;
+        final_r     = check_core.r;
+        final_g     = check_core.g;
+        final_b     = check_core.b;
+        // PBR-Zuweisung vom Core-System
+        final_rough = check_core.roughness;
+        final_metal = check_core.metallic;
+        final_emiss = check_core.emissive;
+        final_spec  = check_core.specular;
     } else { 
-        final_d = check_arch.d;
-        final_r = check_arch.r;
-        final_g = check_arch.g;
-        final_b = check_arch.b;
+        final_d     = check_arch.d;
+        final_r     = check_arch.r;
+        final_g     = check_arch.g;
+        final_b     = check_arch.b;
+        // PBR-Zuweisung von der starren Raum-Architektur
+        final_rough = check_arch.roughness;
+        final_metal = check_arch.metallic;
+        final_emiss = check_arch.emissive;
+        final_spec  = check_arch.specular;
     }
     
-    SdfResult { d: final_d, r: final_r, g: final_g, b: final_b }
+    // Baue das SdfResult erst ganz am Ende beim return frisch zusammen
+    SdfResult { 
+        d: final_d, 
+        r: final_r, 
+        g: final_g, 
+        b: final_b,
+        roughness: final_rough,
+        metallic: final_metal,
+        emissive: final_emiss,
+        specular: final_spec
+    }
 }
+
 #[cube]
-pub fn scene_sdf_normal(p: Vec3, time: f32, blend_factor: f32, meta: &Tensor<f32>, slots: &Tensor<f32>) -> Vec3 {
+pub fn scene_sdf_normal(p: Vec3, time: f32, blend_factor: f32, meta: &Tensor<f32>, slots: &Tensor<f32>, materials: &Tensor<f32>) -> Vec3 {
     let eps = f32::new(0.002);
-    
-    let d_res = scene_sdf(p.clone(), time, blend_factor, meta, slots);
+    let d_res = scene_sdf(p.clone(), time, blend_factor, meta, slots, materials);
     let d = d_res.d;
-    
     let p_x = Vec3::new(p.x + eps, p.y, p.z);
     let p_y = Vec3::new(p.x, p.y + eps, p.z);
     let p_z = Vec3::new(p.x, p.y, p.z + eps);
-
-    let nx = scene_sdf(p_x, time, blend_factor, meta, slots).d - d;
-    let ny = scene_sdf(p_y, time, blend_factor, meta, slots).d - d;
-    let nz = scene_sdf(p_z, time, blend_factor, meta, slots).d - d;
-    
+    let nx = scene_sdf(p_x, time, blend_factor, meta, slots, materials).d - d;
+    let ny = scene_sdf(p_y, time, blend_factor, meta, slots, materials).d - d;
+    let nz = scene_sdf(p_z, time, blend_factor, meta, slots, materials).d - d;
     Vec3::new(nx, ny, nz).normalize()
 }
 
 #[cube]
-pub fn calculate_soft_shadow(
-    ro: Vec3, 
-    rd: Vec3, 
-    time: f32, 
-    blend_factor: f32, 
-    meta: &Tensor<f32>, 
-    slots: &Tensor<f32>
-) -> f32 {
+pub fn calculate_soft_shadow(ro: Vec3, rd: Vec3, time: f32, blend_factor: f32, meta: &Tensor<f32>, slots: &Tensor<f32>, materials: &Tensor<f32>) -> f32 {
     let mut res = f32::new(1.0);
     let mut t = f32::new(0.04); 
     let t_max = f32::new(25.0);
@@ -318,8 +365,8 @@ pub fn calculate_soft_shadow(
         let current_ro = ro.clone();
         let current_rd = rd.clone();
         let p = current_ro.add(current_rd.scale(t));
-        
-        let sdf_res = scene_sdf(p, time, blend_factor, meta, slots);
+        // FIX: add PBR_MATERIALS Tensor-ref
+        let sdf_res = scene_sdf(p, time, blend_factor, meta, slots, materials);
         let h = sdf_res.d;
         
         if h < f32::new(0.001) {
@@ -339,14 +386,7 @@ pub fn calculate_soft_shadow(
 }
 
 #[cube]
-pub fn calculate_ao(
-    p: Vec3, 
-    normal: Vec3, 
-    time: f32, 
-    blend_factor: f32, 
-    meta: &Tensor<f32>, 
-    slots: &Tensor<f32>
-) -> f32 { // 🟢 FIX: Hier fehlte die öffnende Klammer!
+pub fn calculate_ao(p: Vec3, normal: Vec3, time: f32, blend_factor: f32, meta: &Tensor<f32>, slots: &Tensor<f32>, materials: &Tensor<f32>) -> f32 {
     let mut occ = f32::new(0.0);
     let mut sca = f32::new(1.0);
     
@@ -363,7 +403,7 @@ pub fn calculate_ao(
         let ao_pos = current_p.add(current_normal.scale(hr));
         
         // 🟢 FIX: Nutzen der neuen 2-Tensor-Signatur (meta, slots) statt config
-        let sdf_res = scene_sdf(ao_pos, time, blend_factor, meta, slots);
+        let sdf_res = scene_sdf(ao_pos, time, blend_factor, meta, slots, materials);
         let dd = sdf_res.d;
         
         occ += (hr - dd) * sca;
@@ -382,6 +422,7 @@ pub fn raymarch_sdf_kernel(
     output: &mut Tensor<u32>,
     meta: &Tensor<f32>,   // 🟢 REPARIERT: Eindeutiger Metadaten-Tensor
     slots: &Tensor<f32>,  // 🟢 REPARIERT: Ausgerichteter Geometrie-Tensor
+    materials: &Tensor<f32>, // 🟢 FIX 1: Hier fehlte der PBR-Material-Tensor im Funktionskopf!
     time: f32,
     width: u32,
     height: u32,
@@ -439,6 +480,12 @@ pub fn raymarch_sdf_kernel(
         let mut hit_g = f32::new(0.0);
         let mut hit_b = f32::new(0.0);
         
+        // 🟢 FIX: Diese primitiven Variablen registrieren und aus der Schleife retten!
+        let mut hit_rough = f32::new(0.5);
+        let mut hit_metal = f32::new(0.0);
+        let mut hit_emiss = f32::new(0.0);
+        let mut hit_spec  = f32::new(0.5);
+        
         let mut ray_step = u32::new(0);
         loop {
             if ray_step >= u32::new(100) {
@@ -447,16 +494,19 @@ pub fn raymarch_sdf_kernel(
             
             let current_ro = ro.clone();
             let current_rd = final_rd.clone();
-
             let p = current_ro.add(current_rd.scale(t));
             
-            // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an scene_sdf
-            let step_res = scene_sdf(p, t_val, b_factor, meta, slots);
+            let step_res = scene_sdf(p, t_val, b_factor, meta, slots, materials);
             
-            hit_d = step_res.d;
-            hit_r = step_res.r;
-            hit_g = step_res.g;
-            hit_b = step_res.b;
+            hit_d     = step_res.d;
+            hit_r     = step_res.r;
+            hit_g     = step_res.g;
+            hit_b     = step_res.b;
+            // 🟢 Zuweisung der neuen PBR-Kanäle auf primitiver Ebene innerhalb der Schleife
+            hit_rough = step_res.roughness;
+            hit_metal = step_res.metallic;
+            hit_emiss = step_res.emissive;
+            hit_spec  = step_res.specular;
             
             if hit_d < f32::new(0.001) {
                 hit_dist = t;
@@ -468,7 +518,7 @@ pub fn raymarch_sdf_kernel(
                 break; 
             }
             ray_step += u32::new(1);
-        }
+        } // Loop-Ende
 
         let bg_r = f32::new(0.35) - uv_y * f32::new(0.10);
         let bg_g = f32::new(0.45) - uv_y * f32::new(0.12);
@@ -481,8 +531,9 @@ pub fn raymarch_sdf_kernel(
         if hit_dist < f32::new(40.0) {
             let p = ro.add(final_rd.scale(hit_dist));
             // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an die Normalenberechnung
-            let normal = scene_sdf_normal(p.clone(), t_val, b_factor, meta, slots);
-            
+            //let normal = scene_sdf_normal(p.clone(), t_val, b_factor, meta, slots);
+            // 🟢 FIX 3: Materialien an die Normalenberechnung durchreichen
+            let normal = scene_sdf_normal(p.clone(), t_val, b_factor, meta, slots, materials);
             let key_light_pos  = Vec3::new(f32::new(4.0), f32::new(7.0), f32::new(-4.0));
             let fill_light_pos = Vec3::new(f32::new(-5.0), f32::new(3.0), f32::new(-3.0));
             let rim_light_pos  = Vec3::new(f32::new(0.0), f32::new(6.0), f32::new(5.0)); 
@@ -495,17 +546,39 @@ pub fn raymarch_sdf_kernel(
             let diff_fill = normal.dot(fill_dir).max(f32::new(0.0));
             let diff_rim  = normal.dot(rim_dir).max(f32::new(0.0));
             
+            // 🟢 PBR SPEBULAR BLENDUNG:
+            // Berechne die Blickrichtung des Auges/Kamera (View Direction)
+            let view_dir = final_rd.scale(f32::new(-1.0)).normalize();
+            
+            // Halbwertsvektor für Blinn-Phong Specular (Key Light)
+            let half_vec = key_dir.clone().add(view_dir).normalize();
+            let spec_angle = normal.dot(half_vec).max(f32::new(0.0));
+            
+            // Schärfe des Highlights wird umgekehrt proportional zur Rauheit berechnet!
+            // Ein glattes Objekt (roughness 0.1) bekommt einen extrem scharfen, gleißenden Reflex Exponent 128.
+                        // ✅ BEHOBEN: Nutzt die geretteten primitiven Variablen aus der Schleife
+            let spec_power = f32::new(1.0) / hit_rough.max(f32::new(0.01));
+            let specular_highlight = spec_angle.powf(spec_power * f32::new(15.0)) * hit_spec;
+
+           
+            //---SHADOW
             if shadow_mode == u32::new(1) {
                 let offset_p = p.add(normal.scale(f32::new(0.02)));
                 // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an die Schattenberechnung
-                let shadow_factor = calculate_soft_shadow(offset_p, key_dir, t_val, b_factor, meta, slots);
+               // let shadow_factor = calculate_soft_shadow(offset_p, key_dir, t_val, b_factor, meta, slots);
+               // 🟢 FIX 4: Materialien an Weichschatten durchreichen
+                let shadow_factor = calculate_soft_shadow(offset_p, key_dir, t_val, b_factor, meta, slots, materials);
+                
                 diff_key *= shadow_factor;
             }
             
             let mut ao_factor = f32::new(1.0);
             if enable_ao_mode == u32::new(1) {
                 // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an Ambient Occlusion
-                ao_factor = calculate_ao(p, normal, t_val, b_factor, meta, slots);
+                //ao_factor = calculate_ao(p, normal, t_val, b_factor, meta, slots);
+                // 🟢 FIX 5: Materialien an Ambient Occlusion durchreichen
+                ao_factor = calculate_ao(p, normal, t_val, b_factor, meta, slots, materials);
+           
             }
             
             let mut key_r = f32::new(1.00); let mut key_g = f32::new(0.95); let mut key_b = f32::new(0.85);
@@ -516,15 +589,30 @@ pub fn raymarch_sdf_kernel(
             if enable_fill == u32::new(0) { fill_r = f32::new(0.0); fill_g = f32::new(0.0); fill_b = f32::new(0.0); }
             if enable_rim == u32::new(0)  { rim_r = f32::new(0.0); rim_g = f32::new(0.0); rim_b = f32::new(0.0); }
             
+                       // =========================================================================
+            // DYNAMISCHE ALBEDO- & MATERIAL-ÜBERTRAGUNG (Integrierte PBR-Lichtberechnung)
+            // =========================================================================
             let mat_r = hit_r;
             let mat_g = hit_g;
             let mat_b = hit_b;
             
             let l_intensity = light_intensity;
             
-            let lit_r = (key_r * diff_key * l_intensity) + (fill_r * diff_fill * f32::new(0.7)) + (rim_r * diff_rim.powf(f32::new(3.0)) * f32::new(1.5));
-            let lit_g = (key_g * diff_key * l_intensity) + (fill_g * diff_fill * f32::new(0.7)) + (rim_g * diff_rim.powf(f32::new(3.0)) * f32::new(1.5));
-            let lit_b = (key_b * diff_key * l_intensity) + (fill_b * diff_fill * f32::new(0.7)) + (rim_b * diff_rim.powf(f32::new(3.0)) * f32::new(1.5));
+            // 🟢 PBR SPECULAR: Berechne den Blickrichtungsvektor (View Direction)
+            let view_dir = final_rd.scale(f32::new(-1.0)).normalize();
+            
+            // Halbwertsvektor für das Blinn-Phong Glanzlicht des Key-Lights
+            let half_vec = key_dir.clone().add(view_dir).normalize();
+            let spec_angle = normal.dot(half_vec).max(f32::new(0.0));
+            
+            // Die Schärfe des Highlights wird umgekehrt proportional zur Rauheit skaliert
+            let spec_power = f32::new(1.0) / hit_rough.max(f32::new(0.01));
+            let specular_highlight = spec_angle.powf(spec_power * f32::new(15.0)) * hit_spec;
+            
+            // Integration aller Lichtquellen inklusive des neuen Glanzlichts und Eigenleuchtens (Emissive)
+            let lit_r = (key_r * diff_key * l_intensity) + (fill_r * diff_fill * f32::new(0.7)) + (rim_r * diff_rim.powf(f32::new(3.0)) * f32::new(1.5)) + specular_highlight + hit_emiss;
+            let lit_g = (key_g * diff_key * l_intensity) + (fill_g * diff_fill * f32::new(0.7)) + (rim_g * diff_rim.powf(f32::new(3.0)) * f32::new(1.5)) + specular_highlight + hit_emiss;
+            let lit_b = (key_b * diff_key * l_intensity) + (fill_b * diff_fill * f32::new(0.7)) + (rim_b * diff_rim.powf(f32::new(3.0)) * f32::new(1.5)) + specular_highlight + hit_emiss;
             
             let a_strength = ambient_strength;
             let final_r = mat_r * (a_strength * ao_factor + lit_r * ao_factor);
