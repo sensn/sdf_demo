@@ -278,33 +278,41 @@ let client: ComputeClient<cubecl::wgpu::WgpuRuntime<AutoCompiler>> =
                         // GEFIXT: Vollkommen dynamischer 6. Slot (Erzeugung UND unendliches Umschalten)
                                                // GEFIXT FÜR 5-FLOAT LAYOUT: Vollkommen dynamischer 6. Slot
                                                 // GEFIXT: Dynamischer 6. Slot mit vollständiger 8-Float-Layout-Kompatibilität
+                                                // ✅ GEFIXT: Dynamischer 6. Slot mit vollständiger 3-Tensor-PBR-Kompatibilität
                         KeyCode::Digit6 if is_pressed => {
                             current_selected_slot = 5; 
                             
                             if slot_types.len() <= current_selected_slot {
-                                // Schritt A: Komplettes 8-Float-Layout für die CPU-Vektoren pushen
+                                // 1. Geometrie- & Positionsdaten pushen
                                 slot_types.push(1.0f32);       
                                 slot_sizes.push(1.0f32);       
                                 slot_offsets_x.push(0.0f32);   
                                 slot_offsets_y.push(0.0f32);   
                                 slot_offsets_z.push(0.0f32);
                                 
-                                // FIX: Diese Pusht-Operationen verhindern den "index out of bounds" Absturz!
-                                slot_colors_r.push(1.0f32); // Startfarbe Weiß (1.0, 1.0, 1.0)
+                                // 2. Farbkanäle pushen (Startfarbe Weiß)
+                                slot_colors_r.push(1.0f32); 
                                 slot_colors_g.push(1.0f32);
                                 slot_colors_b.push(1.0f32);
                                 
-                                println!("[Space-Lab] 🚀 Slot 6 NEU ERZEUGT! Typ: Kristall (1.0)");
+                                // 🟢 FIX: PBR-Materialeigenschaften für Slot 6 mit pushen!
+                                // Verhindert den Index-out-of-bounds Absturz im config_dirty-Loop
+                                slot_roughness.push(0.3f32); // Startwert: Leicht glänzend
+                                slot_metallic.push(0.0f32);  // Startwert: Nicht-metallisch
+                                slot_emissive.push(0.0f32);  // Startwert: Kein Eigenleuchten
+                                slot_specular.push(0.5f32);  // Startwert: Standard-Reflexion
+                                
+                                println!("[Space-Lab] 🚀 Slot 6 NEU ERZEUGT! Inklusive PBR-Material-Kanäle.");
                             } else {
-                                // Schritt B: Wenn er schon existiert, schalte ihn völlig dynamisch um!
+                                // Wenn er schon existiert, schalte ihn völlig dynamisch um!
                                 let idx = current_selected_slot;
                                 slot_types[idx] = if slot_types[idx] == 0.0 { 1.0 } else if slot_types[idx] == 1.0 { 2.0 } else if slot_types[idx] == 2.0 { 3.0 } else { 0.0 };
                                 println!("[Space-Lab] Slot 6 Zustand gewechselt auf: {}", slot_types[idx]); 
                             }
                             
-                           // active_slots_count = slot_types.len() as f32; 
                             config_dirty = true;
                         }
+
 
 
 
