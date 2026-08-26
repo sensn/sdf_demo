@@ -4,9 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+wgpu = { version = "30.0", default-features = false, features = ["vulkan", "wgsl"] }
 cubecl = { version = "0.11.0-pre.2", features = ["wgpu"] }
+cubecl-wgpu = "0.11.0-pre.2"
+cubecl-runtime = "0.11.0-pre.2"
+cubecl-zspace = "0.11.0-pre.2"
 bytemuck = { version = "1.16", features = ["derive"] }
-winit = { version = "0.29" }
-softbuffer = "0.4"
-pixels = "0.17.2"
-tokio = { version = "1.38", features = ["full"] } 
+winit = { version = "0.30" }
+tokio = { version = "1.38", features = ["full"] }
+pollster = "0.3"
+#...mouse system input
+evdev = "0.12"
+crossbeam-channel = "0.5"

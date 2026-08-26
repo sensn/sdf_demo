@@ -1,522 +1,657 @@
 #![allow(warnings)]
 
 mod kernel;
-//pub mod shadows;
-//pub mod ambient_occlusion;
+pub mod input; 
+use input::InputManager; 
 
+// --- CUBECL IMPORTS (Kompatibel mit v0.11.0-pre.2) ---
 use cubecl::prelude::*;
+use cubecl::client::ComputeClient; // 🟢 KORREKTUR: client:: hinzufügen
+use cubecl::server::Handle; // 🟢 FIX: Direkt über das Haupt-Crate importieren
+use cubecl::frontend::{TensorArg, TensorBinding};
 
-//use cubecl::wgpu::WgpuRuntime;
-use cubecl::client::ComputeClient; // Expliziter Import des Client-Typs
-use cubecl::wgpu::{WgpuRuntime, AutoCompiler};
+// Alle wgpu-Backend-spezifischen Typen kommen nativ aus cubecl_wgpu
+use cubecl_wgpu::{WgpuRuntime, AutoCompiler, WgpuResource, WgpuSetup, init_device, RuntimeOptions};
 
-//use cubecl::wgpu::AutoCompiler; // Make sure this is in scope
-use softbuffer::{Context, Surface};
-use std::num::NonZeroU32;
+// (Falls benötigt für dein Projekt - bleibt unverändert)
+use cubecl_zspace::{Strides, Shape};
+
+// --- CORE / UTILS IMPORTS ---
+use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
 use std::time::{Instant, Duration};
+
+// --- MODERN WINIT 0.30 IMPORTS ---
 use winit::dpi::LogicalSize;
-use winit::event::{Event, WindowEvent, KeyEvent, ElementState};
-use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::WindowBuilder;
+use winit::{
+    application::ApplicationHandler,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::{Window, WindowId},
+};
 
-enum BackgroundMessage {
-    LevelDataLoaded { level_id: u32, blend_factor: f32 },
+// --- NATIVE WGPU IMPORTS ---
+use wgpu::util::DeviceExt;
+// Füge hier sicherheitshalber noch die Basis-Typen von wgpu hinzu, falls dein Code sie nutzt:
+use wgpu::{
+    Backends, Device, Instance, InstanceDescriptor, Queue, Surface, SurfaceConfiguration, TextureUsages
+};
+
+
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+struct ResolutionUniform {
+    width: u32,
+    height: u32,
+    _padding: [u32; 2], // 16-byte alignment for uniform buffer
 }
 
-struct KeyboardState {
-    w: bool,
-    s: bool,
-    a: bool,
-    d: bool,
-    space: bool,
-    c: bool,
-    i: bool,
-    k: bool,
-    j: bool,
-    l: bool,
-    u: bool, // HIER HINZUGEFÜGT
-    o: bool, // HIER HINZUGEFÜGT
-    p: bool, // HIER HINZUGEFÜGT
-    h: bool, // HIER HINZUGEFÜGT
+// 1. Der Winit 0.30 Zustands-Manager kapselt deine Application und den InputManager
+struct App {
+    app_state: Option<Application>,
+    input_manager: InputManager,
+}
+
+struct Application {
+        pub window: Arc<Window>, // In Winit 0.30 ist das Window-Objekt direkt im winit-Root
+    //pub window: Arc<winit::window::Window>,
+    pub surface: wgpu::Surface<'static>,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub config: wgpu::SurfaceConfiguration,
+    
+    // CubeCL resources
+    pub client: ComputeClient<WgpuRuntime<AutoCompiler>>,
+    pub output_handle: Handle,
+    
+    // wgpu render resources
+    pub render_pipeline: wgpu::RenderPipeline,
+    pub bind_group: wgpu::BindGroup,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+    pub resolution_buffer: wgpu::Buffer,
+    pub resolution_uniform: ResolutionUniform,
+        // 🟢 NEU: Kamera-Zustand dauerhaft in der Struktur speichern!
+    pub cam_x: f32,
+    pub cam_y: f32,
+    pub cam_z: f32,
+    pub cam_yaw: f32,
+    pub cam_pitch: f32,
     //
-    // FIX: Die 4 neuen Felder für die Transformation hinzufügen!
-    grow: bool,
-    shrink: bool,
-    y_up: bool,
-    y_down: bool,
+    // 🟢 NEU: Licht- und Rendering-Parameter in der Struktur speichern
+    pub light_intensity: f32,
+    pub ambient_strength: f32,
+    pub enable_ao_mode: u32,
+    pub current_shadow_mode: u32,
+    pub enable_key: u32,
+    pub enable_fill: u32,
+    pub enable_rim: u32,
+    pub dynamic_blend_factor: f32,
+    // Frame timing
+    frame_counter: u32,
+    last_frame_time: Instant,
+    total_time: f32, // 🟢 NEU hinzufügen
 }
 
+impl Application {
+    async fn new(window: Arc<winit::window::Window>) -> Self {
+        let size = window.inner_size();
+        let width = size.width;
+        let height = size.height;
+        let total_pixels = (width * height) as usize;
+       // let byte_size = total_pixels * std::mem::size_of::<u32>();
+          let byte_size = total_pixels * 3 * std::mem::size_of::<f32>(); 
+        // 1. Create wgpu Instance, Adapter, Device, Queue
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            flags: wgpu::InstanceFlags::empty(),
+            backend_options: wgpu::BackendOptions::default(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            display: None,
+        });
+        
+        let surface = instance.create_surface(window.clone()).unwrap();
+        
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+                apply_limit_buckets: false,
+            })
+            .await
+            .unwrap();
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-   // let width = 800u32;
-   // let height = 600u32;
-   // let width = 1920u32;
-   // let height = 1080u32;
-    let width = 960u32;
-    let height = 540u32;
-    let total_pixels = (width * height) as usize;
-    let byte_size = total_pixels * std::mem::size_of::<u32>();
+        let (wgpu_device, wgpu_queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("SDF Demo Device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default(),
+                    memory_hints: wgpu::MemoryHints::default(),
+                    experimental_features: wgpu::ExperimentalFeatures::default(),
+                    trace: wgpu::Trace::Off,
+                },
+            )
+            .await
+            .unwrap();
 
-    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<BackgroundMessage>();
-    let (_trigger_tx, mut trigger_rx) = tokio::sync::mpsc::unbounded_channel::<u32>();
+        let device = Arc::new(wgpu_device);
+        let queue = Arc::new(wgpu_queue);
 
-    rt.spawn(async move {
-        while let Some(level_to_load) = trigger_rx.recv().await {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            let _ = tx.send(BackgroundMessage::LevelDataLoaded {
-                level_id: level_to_load,
-                blend_factor: 99.0,
-            });
+        // 2. Configure Surface
+        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .find(|f| f.is_srgb())
+            .copied()
+            .unwrap_or(surface_caps.formats[0]);
+        
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
+            format: surface_format,
+            width,
+            height,
+            present_mode: wgpu::PresentMode::Fifo, // V-SYNC Immediate (V-Sync AUS),Mailbox (Fast V-Sync / G-Sync)
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+            color_space: wgpu::SurfaceColorSpace::Srgb,
+        };
+        surface.configure(&device, &config);
+
+        // ====================================================================
+        // ZERO-COPY KEY: Register the SAME device/queue with CubeCL
+        // ====================================================================
+        let wgpu_setup = WgpuSetup {
+            instance: instance.clone(),
+            adapter: adapter.clone(),
+            device: device.as_ref().clone(),
+            queue: queue.as_ref().clone(),
+            backend: wgpu::Backend::Vulkan,
+        };
+        
+        let cubecl_device_id = init_device(wgpu_setup, RuntimeOptions::default());
+        
+        let client: ComputeClient<WgpuRuntime<AutoCompiler>> = 
+            WgpuRuntime::client(&cubecl_device_id);
+
+        // 3. Create output buffer on the SHARED device (via CubeCL client)
+        let output_handle = client.empty(byte_size);
+
+        // 4. Create wgpu render pipeline
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Screen Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+        });
+
+        // Resolution uniform buffer
+        let resolution_uniform = ResolutionUniform {
+            width,
+            height,
+            _padding: [0, 0],
+        };
+        
+        let resolution_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Resolution Uniform"),
+            contents: bytemuck::cast_slice(&[resolution_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+        });
+
+        // Bind group layout
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Screen Bind Group Layout"),
+            entries: &[
+                // Binding 0: Storage buffer (CubeCL output)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Binding 1: Uniform buffer (Resolution)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // Pipeline layout
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Screen Pipeline Layout"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
+
+        // Render pipeline
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Screen Render Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // Placeholder bind group (will be recreated each frame with actual CubeCL buffer)
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Screen Bind Group (placeholder)"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &resolution_buffer, // placeholder
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &resolution_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+            ],
+        });
+
+        Self {
+            window,
+            surface,
+            device,
+            queue,
+            config,
+            client,
+            output_handle,
+            render_pipeline,
+            bind_group,
+            bind_group_layout,
+            resolution_buffer,
+            resolution_uniform,
+           
+             // 🟢 NEU: Startwerte für die Kamera festlegen
+            cam_x: 0.0,
+            cam_y: 0.0,
+            cam_z: -5.0,
+            cam_yaw: 0.0,
+            cam_pitch: 0.0,
+            
+            // 🟢 NEU: Licht-Startwerte setzen
+            light_intensity: 1.0,
+            ambient_strength: 0.1,
+            enable_ao_mode: 1,
+            current_shadow_mode: 1,
+            enable_key: 1,
+            enable_fill: 1,
+            enable_rim: 1,
+            dynamic_blend_factor: 0.0,
+            
+            frame_counter: 0,
+            last_frame_time:     Instant::now(),
+            total_time: 0.0, // 🟢 HIER REINSCHREIBEN!
         }
-    });
-
-    let device = Default::default();
- // Wir geben dem Compiler den konkreten Typ vor, damit er weiß, dass AutoCompiler genutzt wird
-let client: ComputeClient<cubecl::wgpu::WgpuRuntime<AutoCompiler>> = 
-    cubecl::wgpu::WgpuRuntime::client(&device);
-
-    let output_handle = client.empty(byte_size);
-
-    let event_loop = EventLoop::new()?;
-    let window = Arc::new(
-        WindowBuilder::new()
-            .with_title("Temple of Wisdom | Optimized State-Change Buffer")
-            .with_inner_size(LogicalSize::new(width, height))
-            .with_resizable(false)
-            .build(&event_loop)?
-    );
-
-      let context = Context::new(window.clone())?;
-    let mut surface = Surface::new(&context, window.clone())?;
-    surface.resize(NonZeroU32::new(width).unwrap(), NonZeroU32::new(height).unwrap())?;
-
-    let mut cam_x = 0.0f32; let mut cam_y = 0.0f32; let mut cam_z = -4.5f32;
-    let mut cam_yaw = 0.0f32; let mut cam_pitch = 0.0f32; 
-    let mut current_shadow_mode = 2u32;
-    let mut enable_ao_mode = 1u32; 
-    let mut dynamic_blend_factor = 0.2f32;
-    let mut light_intensity = 1.0f32; let mut ambient_strength = 0.15f32; 
-    let mut enable_key = 1u32; let mut enable_fill = 1u32; let mut enable_rim = 1u32;
-
-     // =========================================================================
-    // DYNAMISCHE SLOT-KONFIGURATION (Vektoren für CPU-Logik - .push() voll erlaubt!)
-    // =========================================================================
-    let mut slot_types = vec![1.0f32, 2.0f32, 3.0f32, 0.0f32, 0.0f32]; 
-    let mut slot_sizes = vec![1.0f32, 1.0f32, 1.0f32, 1.0f32, 1.0f32]; 
-
-    let mut slot_offsets_x = vec![0.0f32, -1.8f32, 1.8f32, 0.0f32, 0.0f32];  
-    let mut slot_offsets_z = vec![0.0f32, 0.0f32, 0.0f32, 1.8f32, -1.8f32];
-    let mut slot_offsets_y = vec![0.0f32; 5]; // Start-Höhe für alle 5 Slots ist 0.0 
-
-    // INITIALISIERUNG DER FARBEN:
-    let mut slot_colors_r = vec![1.0f32, 0.0f32, 0.0f32, 0.7f32, 0.5f32]; // Slot 1: ROT
-    let mut slot_colors_g = vec![0.0f32, 1.0f32, 0.0f32, 0.7f32, 0.5f32]; // Slot 2: GRÜN
-    let mut slot_colors_b = vec![0.0f32, 0.0f32, 1.0f32, 0.7f32, 0.5f32]; // Slot 3: BLAU
-
-    // Dieses Flag signalisiert, ob eine Transformation den Puffer überschreiben muss
-    let mut config_dirty = true;
-
-    // =========================================================================
-    // INITIALISIERUNG DER GETRENNTEN GPU-TENSOREN (Perfektes Vec4 Alignment)
-    // =========================================================================
-    // 🟢 CONSTANTS FOR FIXED SLICE ALLOCATION: Verhindert WGPU Slice Out-of-Bounds Panics!
-    const MAX_SLOTS: usize = 100;
-    const TOTAL_SLOT_FLOATS: usize = MAX_SLOTS * 8; // Feste 800 Floats Kapazität im VRAM
-
-    // 🟢 PUFFER A: Metadaten (NUR die dynamische Scan-Tiefe für die GPU-Schleife)
-    let meta_raw = vec![slot_types.len() as f32];
-    let meta_handle = client.create(cubecl::bytes::Bytes::from_elems(meta_raw));
-
-    // 🟢 PUFFER B: Reine Geometrie (Alloziert sofort die vollen 800 Floats als invarianten Raum)
-    let mut initial_slots = vec![0.0f32; TOTAL_SLOT_FLOATS];
-    
-    // Verpackt die initialen Slots sequentiell im exakten 8er-Raster ab Startindex 0
-    for i in 0..slot_types.len() {
-        let base = i * 8;
-        initial_slots[base]     = slot_types[i];     // +0: Typ
-        initial_slots[base + 1] = slot_sizes[i];     // +1: Größe
-        initial_slots[base + 2] = slot_offsets_x[i]; // +2: Translation X
-        initial_slots[base + 3] = slot_offsets_y[i]; // +3: Translation Y
-        initial_slots[base + 4] = slot_offsets_z[i]; // +4: Translation Z
-        initial_slots[base + 5] = slot_colors_r[i];  // +5: Farbe R
-        initial_slots[base + 6] = slot_colors_g[i];  // +6: Farbe G
-        initial_slots[base + 7] = slot_colors_b[i];  // +7: Farbe B
     }
-    
-    // Das Handle besitzt ab jetzt für immer invarianten Platz für bis zu 100 Slots
-    let slots_handle = client.create(cubecl::bytes::Bytes::from_elems(initial_slots));
-//--------------PBR-MAT-INIT------
-    // CPU-Vektoren für die physikalischen Materialien (PBR)
-    let mut slot_roughness = vec![0.2f32, 0.5f32, 0.1f32, 0.5f32, 0.5f32]; // Slot 1: Sehr glatt/glänzend
-    let mut slot_metallic  = vec![1.0f32, 0.0f32, 0.8f32, 0.0f32, 0.0f32]; // Slot 1: Vollmetallisch
-    let mut slot_emissive  = vec![0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32];
-    let mut slot_specular  = vec![1.0f32, 0.5f32, 1.0f32, 0.5f32, 0.5f32];
 
-    const TOTAL_MATERIAL_FLOATS: usize = MAX_SLOTS * 4; // Starr 400 Floats Platz für PBR-Werte
-
-    // Initialen Puffer mit Nullen befüllen und einmalig allozieren
-        // ✅ SAUBERER FIX: Nutzt den korrekten Vektornamen für das Material-Feld
-    let mut initial_materials = vec![0.0f32; TOTAL_MATERIAL_FLOATS];
-    for i in 0..slot_types.len() {
-        let base = i * 4; 
-        initial_materials[base]     = slot_roughness[i];
-        initial_materials[base + 1] = slot_metallic[i];
-        initial_materials[base + 2] = slot_emissive[i];
-        initial_materials[base + 3] = slot_specular[i];
+    fn resize(&mut self, new_width: u32, new_height: u32) {
+        if new_width == 0 || new_height == 0 {
+            return;
+        }
+        
+        self.config.width = new_width;
+        self.config.height = new_height;
+        self.surface.configure(&self.device, &self.config);
+        
+        // Update resolution uniform
+        self.resolution_uniform.width = new_width;
+        self.resolution_uniform.height = new_height;
+        self.queue.write_buffer(
+            &self.resolution_buffer,
+            0,
+            bytemuck::cast_slice(&[self.resolution_uniform]),
+        );
+        
+        // Reallocate CubeCL output buffer for new size
+        let total_pixels = (new_width * new_height) as usize;
+        //let byte_size = total_pixels * std::mem::size_of::<u32>();
+        let byte_size = total_pixels * 3 * std::mem::size_of::<f32>(); 
+        self.output_handle = self.client.empty(byte_size);
     }
-    let materials_handle = client.create(cubecl::bytes::Bytes::from_elems(initial_materials));
 
-//________________________________
+    fn update_compute(&mut self) {
+        // 🟢 KORREKTUR: Wir nutzen self.total_time, die oben in render()      flüssig berechnet wurde!
+        // 1. Echte Delta-Time berechnen (zu Beginn von update_compute)
+        let now = Instant::now();
+        let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
+        self.last_frame_time = now; // Zeitstempel für das nächste Frame aktualisieren
 
+        // 2. Gesamtzeit flüssig aufaddieren
+        self.total_time += delta_time * 1.0;
+        let time = self.total_time; 
+        // Camera and rendering parameters (from original code)
+        //let time = self.last_frame_time.elapsed().as_secs_f32();
+        let width = self.config.width;
+        let height = self.config.height;
+        let total_pixels = (width * height) as usize;
+        
+       // 🟢 KORREKTUR: Werte aus self auslesen, statt sie fest auf 0.0 / -5.0 zu setzen!
+    let cam_x = self.cam_x;
+    let cam_y = self.cam_y;
+    let cam_z = self.cam_z;
+    let cam_yaw = self.cam_yaw;
+    let cam_pitch = self.cam_pitch;
+        
+        /// 🟢 KORREKTUR: Jetzt dynamisch aus der Struktur lesen!
+    let light_intensity = self.light_intensity;
+    let ambient_strength = self.ambient_strength;
+    let enable_ao_mode = self.enable_ao_mode;
+    let current_shadow_mode = self.current_shadow_mode;
+    let enable_key = self.enable_key;
+    let enable_fill = self.enable_fill;
+    let enable_rim = self.enable_rim;
+    let dynamic_blend_factor = self.dynamic_blend_factor;
 
+        // Launch the SDF kernel
+        let cube_count = cubecl::CubeCount::Static(
+            (width + 15) / 16, 
+            (height + 3) / 4, 
+            1
+        );
+        let cube_dim = cubecl::CubeDim::new_3d(16, 4, 1);
 
-    // BEHOBEN: Alle Felder werden direkt innerhalb des Struct-Initialisierers auf false gesetzt!
-    let mut keys = KeyboardState {
-        w: false,
-        s: false,
-        a: false,
-        d: false,
-        space: false,
-        c: false,
-        i: false,
-        k: false,
-        j: false,
-        l: false,
-        u: false, // Direkt im Struct gesetzt
-        o: false,
-        p: false,
-        h: false,
-        // FIX: Die 4 neuen Felder für die Transformation hinzufügen!
-    grow: false,
-    shrink: false,
-    y_up: false,
-    y_down: false,
-    };
+        // We need to create the meta, slots, and materials handles
+        // For now, let's create minimal buffers for them
+        let meta_handle = self.client.empty(std::mem::size_of::<f32>()); // 1 f32
+        let slots_handle = self.client.empty(800 * std::mem::size_of::<f32>()); // TOTAL_SLOT_FLOATS
+        let materials_handle = self.client.empty(100 * std::mem::size_of::<f32>()); // TOTAL_MATERIAL_FLOATS
 
-    // HIER die fehlende Selektionsvariable direkt darunter anlegen (behebt E0425)
-    let mut current_selected_slot: usize = 0; 
+        // Create TensorArgs from raw handles
+        let output_arg = unsafe {
+            TensorArg::from_raw_parts(
+                self.output_handle.clone(),
+                Strides::from(&[1usize]),
+                Shape::from(&[total_pixels]),
+            )
+        };
+        
+        let meta_arg = unsafe {
+            TensorArg::from_raw_parts(
+                meta_handle.clone(),
+                Strides::from(&[1usize]),
+                Shape::from(&[1usize]),
+            )
+        };
+        
+        let slots_arg = unsafe {
+            TensorArg::from_raw_parts(
+                slots_handle.clone(),
+                Strides::from(&[1usize]),
+                Shape::from(&[800usize]),
+            )
+        };
+        
+        let materials_arg = unsafe {
+            TensorArg::from_raw_parts(
+                materials_handle.clone(),
+                Strides::from(&[1usize]),
+                Shape::from(&[100usize]),
+            )
+        };
 
-        let start_time = Instant::now();
-    println!("[Main] Dynamische Engine gestartet. Reaktive Puffer-Steuerung aktiv.");
-
-    event_loop.run(move |event, elwt| {
-        elwt.set_control_flow(ControlFlow::Poll);
-
-        match event {
-            // Fenster-Events abfangen und Tastatur-Eingaben sauber entpacken
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => elwt.exit(),
-                WindowEvent::KeyboardInput { event: KeyEvent { physical_key: PhysicalKey::Code(code), state, .. }, .. } => {
-                    let is_pressed = state == ElementState::Pressed;
-                    
-                    match code {
-                        // 1. KAMERA-NAVIGATION & ROTATION (Dauerhaftes Halten der Tasten)
-                        KeyCode::KeyW => keys.w = is_pressed,
-                        KeyCode::KeyS => keys.s = is_pressed,
-                        KeyCode::KeyA => keys.a = is_pressed,
-                        KeyCode::KeyD => keys.d = is_pressed,
-                        KeyCode::Space => keys.space = is_pressed,
-                        KeyCode::KeyC => keys.c = is_pressed,
-                        KeyCode::KeyI => keys.i = is_pressed, // Kamera Pitch Up
-                        KeyCode::KeyK => keys.k = is_pressed, // Kamera Pitch Down
-                        KeyCode::KeyJ => keys.j = is_pressed, // Kamera Yaw Left
-                        KeyCode::KeyL => keys.l = is_pressed, // Kamera Yaw Right
-                        //
-                        // FREIE TASTEN GEFUNDEN: Objekt-Transformation (Y-Achse auf E und Q)
-                        KeyCode::KeyZ => keys.y_up = is_pressed,
-                        KeyCode::KeyX => keys.y_down = is_pressed,
-
-                        // GLOBALE SKALIERUNG / GRÖSSE (Plus und Minus)
-                                                // SAUBERES FIX FÜR NORMALE TASTATUREN (+ / - ohne Numpad)
-                        KeyCode::KeyG => keys.grow = is_pressed,
-                        KeyCode::KeyY => keys.shrink = is_pressed,
-
-                                               // 2. DYNAMISCHES SLOT-SPAWNING & SELEKTION (Slots 1 bis 5)
-                                               // =========================================================================
-                        // DYNAMISCHES SLOT-SPAWNING & SELEKTION (Slots 1 bis 6+)
-                        // =========================================================================
-                        KeyCode::Digit1 if is_pressed => { 
-                            current_selected_slot = 0; 
-                            slot_types[0] = if slot_types[0] == 0.0 { 1.0 } else if slot_types[0] == 1.0 { 2.0 } else if slot_types[0] == 2.0 { 3.0 } else { 0.0 }; 
-                            // BUGFIX: Schicke der GPU die tatsächliche Länge, nicht die Anzahl der gefüllten Slots!
-                           // active_slots_count = slot_types.len() as f32; 
-                            config_dirty = true; 
-                            println!("[Space-Lab] Slot 1 ausgewählt & geändert: {}", slot_types[0]); 
-                        }
-                        KeyCode::Digit2 if is_pressed => { 
-                            current_selected_slot = 1; 
-                            slot_types[1] = if slot_types[1] == 0.0 { 1.0 } else if slot_types[1] == 1.0 { 2.0 } else if slot_types[1] == 2.0 { 3.0 } else { 0.0 }; 
-                           // active_slots_count = slot_types.len() as f32; 
-                            config_dirty = true; 
-                            println!("[Space-Lab] Slot 2 ausgewählt & geändert: {}", slot_types[1]); 
-                        }
-                        KeyCode::Digit3 if is_pressed => { 
-                            current_selected_slot = 2; 
-                            slot_types[2] = if slot_types[2] == 0.0 { 1.0 } else if slot_types[2] == 1.0 { 2.0 } else if slot_types[2] == 2.0 { 3.0 } else { 0.0 }; 
-                           // active_slots_count = slot_types.len() as f32; 
-                            config_dirty = true; 
-                            println!("[Space-Lab] Slot 3 ausgewählt & geändert: {}", slot_types[2]); 
-                        }
-                        KeyCode::Digit4 if is_pressed => { 
-                            current_selected_slot = 3; 
-                            slot_types[3] = if slot_types[3] == 0.0 { 1.0 } else if slot_types[3] == 1.0 { 2.0 } else if slot_types[3] == 2.0 { 3.0 } else { 0.0 }; 
-                          //  active_slots_count = slot_types.len() as f32; 
-                            config_dirty = true; 
-                            println!("[Space-Lab] Slot 4 ausgewählt & geändert: {}", slot_types[3]); 
-                        }
-                        KeyCode::Digit5 if is_pressed => { 
-                            current_selected_slot = 4; 
-                            slot_types[4] = if slot_types[4] == 0.0 { 1.0 } else if slot_types[4] == 1.0 { 2.0 } else if slot_types[4] == 2.0 { 3.0 } else { 0.0 }; 
-                           // active_slots_count = slot_types.len() as f32; 
-                            config_dirty = true; 
-                            println!("[Space-Lab] Slot 5 ausgewählt & geändert: {}", slot_types[4]); 
-                        }
-
-                        // GEFIXT: Vollkommen dynamischer 6. Slot (Erzeugung UND unendliches Umschalten)
-                                               // GEFIXT FÜR 5-FLOAT LAYOUT: Vollkommen dynamischer 6. Slot
-                                                // GEFIXT: Dynamischer 6. Slot mit vollständiger 8-Float-Layout-Kompatibilität
-                                                // ✅ GEFIXT: Dynamischer 6. Slot mit vollständiger 3-Tensor-PBR-Kompatibilität
-                        KeyCode::Digit6 if is_pressed => {
-                            current_selected_slot = 5; 
-                            
-                            if slot_types.len() <= current_selected_slot {
-                                // 1. Geometrie- & Positionsdaten pushen
-                                slot_types.push(1.0f32);       
-                                slot_sizes.push(1.0f32);       
-                                slot_offsets_x.push(0.0f32);   
-                                slot_offsets_y.push(0.0f32);   
-                                slot_offsets_z.push(0.0f32);
-                                
-                                // 2. Farbkanäle pushen (Startfarbe Weiß)
-                                slot_colors_r.push(1.0f32); 
-                                slot_colors_g.push(1.0f32);
-                                slot_colors_b.push(1.0f32);
-                                
-                                // 🟢 FIX: PBR-Materialeigenschaften für Slot 6 mit pushen!
-                                // Verhindert den Index-out-of-bounds Absturz im config_dirty-Loop
-                                slot_roughness.push(0.3f32); // Startwert: Leicht glänzend
-                                slot_metallic.push(0.0f32);  // Startwert: Nicht-metallisch
-                                slot_emissive.push(0.0f32);  // Startwert: Kein Eigenleuchten
-                                slot_specular.push(0.5f32);  // Startwert: Standard-Reflexion
-                                
-                                println!("[Space-Lab] 🚀 Slot 6 NEU ERZEUGT! Inklusive PBR-Material-Kanäle.");
-                            } else {
-                                // Wenn er schon existiert, schalte ihn völlig dynamisch um!
-                                let idx = current_selected_slot;
-                                slot_types[idx] = if slot_types[idx] == 0.0 { 1.0 } else if slot_types[idx] == 1.0 { 2.0 } else if slot_types[idx] == 2.0 { 3.0 } else { 0.0 };
-                                println!("[Space-Lab] Slot 6 Zustand gewechselt auf: {}", slot_types[idx]); 
-                            }
-                            
-                            config_dirty = true;
-                        }
-
-
-
-
-                        // 3. ECHTZEIT-OBJEKT-TRANSFORMATION (Nutzt U, O, P, H)
-                        KeyCode::KeyU => keys.u = is_pressed, 
-                        KeyCode::KeyO => keys.o = is_pressed, 
-                        KeyCode::KeyP => keys.p = is_pressed, 
-                        KeyCode::KeyH => keys.h = is_pressed,
-                        ////
-
-                        // 4. GLOBALE SKALIERUNG DER OBJEKTE
-                        KeyCode::KeyM if is_pressed => {
-                            for s in slot_sizes.iter_mut() { *s = (*s + 0.1f32).min(2.5f32); }
-                            config_dirty = true;
-                            println!("[Space-Lab] Alle Objekte vergrößert.");
-                        }
-                        KeyCode::KeyN if is_pressed => {
-                            for s in slot_sizes.iter_mut() { *s = (*s - 0.1f32).max(0.2f32); }
-                            config_dirty = true;
-                            println!("[Space-Lab] Alle Objekte verkleinert.");
-                        }
-
-                        // 5. RENDERING-PARAMETER (Licht, Schatten, Ambient Occlusion)
-                        KeyCode::Digit0 if is_pressed => { 
-                            enable_ao_mode = if enable_ao_mode == 1 { 0 } else { 1 }; 
-                            println!("[Space-Lab] Ambient Occlusion gewechselt: {}", if enable_ao_mode == 1 { "EIN" } else { "AUS" });
-                        }
-                        KeyCode::KeyQ if is_pressed => { light_intensity = (light_intensity - 0.1f32).max(0.0f32); }
-                        KeyCode::KeyE if is_pressed => { light_intensity = (light_intensity + 0.1f32).min(3.0f32); }
-                        KeyCode::KeyF if is_pressed => { ambient_strength = (ambient_strength - 0.05f32).max(0.0f32); }
-                        KeyCode::KeyR if is_pressed => { ambient_strength = (ambient_strength + 0.05f32).min(1.0f32); }
-                        
-                        KeyCode::Digit7 if is_pressed => { enable_key = if enable_key == 1 { 0 } else { 1 }; }
-                        KeyCode::Digit8 if is_pressed => { enable_fill = if enable_fill == 1 { 0 } else { 1 }; }
-                        KeyCode::Digit9 if is_pressed => { enable_rim = if enable_rim == 1 { 0 } else { 1 }; }
-                        
-                        KeyCode::ArrowRight if is_pressed => { if current_shadow_mode < 2 { current_shadow_mode += 1; } }
-                        KeyCode::ArrowLeft if is_pressed => { if current_shadow_mode > 0 { current_shadow_mode -= 1; } }
-                        _ => {}
-                    }
-                }
-                _ => {}
-            }, 
-
-                                   Event::AboutToWait => {
-                while let Ok(message) = rx.try_recv() {
-                    match message { BackgroundMessage::LevelDataLoaded { blend_factor, .. } => { dynamic_blend_factor = blend_factor; } }
-                }
-
-                // 1. KAMERA-NAVIGATION (Dauerhaftes Halten)
-                let look_speed = 0.02f32;
-                if keys.i { cam_pitch += look_speed; } if keys.k { cam_pitch -= look_speed; }
-                if keys.j { cam_yaw -= look_speed; } if keys.l { cam_yaw += look_speed; }
-                cam_pitch = cam_pitch.clamp(-1.4, 1.4);
-
-                let move_speed = 0.29f32;
-                let cos_y = f32::cos(cam_yaw); let sin_y = f32::sin(cam_yaw);
-                if keys.w { cam_x += sin_y * move_speed; cam_z += cos_y * move_speed; }
-                if keys.s { cam_x -= sin_y * move_speed; cam_z -= cos_y * move_speed; }
-                if keys.a { cam_x -= cos_y * move_speed; cam_z -= -sin_y * move_speed; }
-                if keys.d { cam_x += cos_y * move_speed; cam_z += -sin_y * move_speed; }
-                if keys.space { cam_y += move_speed; } if keys.c { cam_y -= move_speed; }
-
-                // 2. INDIVIDUELLE OBJEKT-TRANSFORMATIONEN (Dauerhaftes Halten)
-                let obj_speed = 0.05f32;
-                let scale_speed = 0.02f32;
-                let sel = current_selected_slot; 
-
-                // Sicherheitsabfrage gegen Index-Overflows vor Slot 6
-                if sel < slot_types.len() {
-                    // Horizontale Translation (X/Z-Achse via U, O, P, H)
-                    if keys.u { slot_offsets_x[sel] += obj_speed; config_dirty = true; } 
-                    if keys.o { slot_offsets_x[sel] -= obj_speed; config_dirty = true; } 
-                    if keys.p { slot_offsets_z[sel] += obj_speed; config_dirty = true; } 
-                    if keys.h { slot_offsets_z[sel] -= obj_speed; config_dirty = true; } 
-
-                    // Vertikale Translation (Y-Achse via Z und X laut deinem gezeigten Mapping)
-                    if keys.y_up   { slot_offsets_y[sel] += obj_speed; config_dirty = true; }
-                    if keys.y_down { slot_offsets_y[sel] -= obj_speed; config_dirty = true; }
-
-                    // Individuelle Skalierung (Größe via G und Y laut deinem gezeigten Mapping)
-                    if keys.grow   { slot_sizes[sel] = (slot_sizes[sel] + scale_speed).min(5.0); config_dirty = true; }
-                    if keys.shrink { slot_sizes[sel] = (slot_sizes[sel] - scale_speed).max(0.1); config_dirty = true; }
-                }
-
-                let time = start_time.elapsed().as_secs_f32();
-                
-                // 3. HOCHEFFIZIENTES GPU-STREAMING (2-Tensor-Architektur)
-                if config_dirty {
-                    // Puffer A aktualisieren: Die aktuelle Länge live ermitteln
-                    let current_len = slot_types.len() as f32;
-                    let meta_raw = vec![current_len];
-                    client.write(&meta_handle, cubecl::bytes::Bytes::from_elems(meta_raw));
-                     // 1. Geometrie & Farbe streamen (Unverändert, Stride 8)
-                    // Puffer B aktualisieren: Lokales Feld mit der starren Maximalgröße von 800 Floats befüllen
-                    let mut dynamic_slots = vec![0.0f32; TOTAL_SLOT_FLOATS];
-                    
-                    for i in 0..slot_types.len() {
-                        if i >= MAX_SLOTS { break; }
-                        let base = i * 8; // Sauberer, ausgerichteter 8er Schritt ab Index 0
-                        
-                        dynamic_slots[base]     = slot_types[i];
-                        dynamic_slots[base + 1] = slot_sizes[i];
-                        dynamic_slots[base + 2] = slot_offsets_x[i];
-                        dynamic_slots[base + 3] = slot_offsets_y[i];
-                        dynamic_slots[base + 4] = slot_offsets_z[i];
-                        dynamic_slots[base + 5] = slot_colors_r[i];
-                        dynamic_slots[base + 6] = slot_colors_g[i];
-                        dynamic_slots[base + 7] = slot_colors_b[i];
-                    }
-                    
-                    // Schreibt die fixen 800 Floats direkt in den Slice
-                    let slots_bytes = cubecl::bytes::Bytes::from_elems(dynamic_slots);
-                    client.write(&slots_handle, slots_bytes);
-                    // 2. 🟢 NEU: PBR-Materialien starr im 4er-Schritt streamen
-                    let mut dynamic_materials = vec![0.0f32; TOTAL_MATERIAL_FLOATS];
-                    for i in 0..slot_types.len() {
-                        if i >= MAX_SLOTS { break; }
-                        let base = i * 4;
-                        dynamic_materials[base]     = slot_roughness[i];
-                        dynamic_materials[base + 1] = slot_metallic[i];
-                        dynamic_materials[base + 2] = slot_emissive[i];
-                        dynamic_materials[base + 3] = slot_specular[i];
-                    }
-                    client.write(&materials_handle, cubecl::bytes::Bytes::from_elems(dynamic_materials));
-                    //---------------
-                    config_dirty = false;
-                    println!("[Engine] GPU-Speicher via client.write synchronisiert. Aktive Slots im Scope: {}", current_len);
-                }
-
-
-
-
- // =========================================================================
-        // METADATEN-SHAPES FÜR DEN LAUNCH (🟢 FIX: Korrektes 1-Element-Layout)
-        // =========================================================================
-        // Der meta-Tensor enthält exakt 1 Element (die Länge), daher MUSS die Shape [1] sein!
-        let meta_shape: Vec<usize> = vec![1];
-        let meta_strides: Vec<usize> = Vec::<usize>::new();
-
-        // Der slots-Tensor enthält die festen 800 Elemente für dein Objektraster
-        let slots_shape: Vec<usize> = vec![TOTAL_SLOT_FLOATS]; // 800 Elements
-        let slots_strides: Vec<usize> = Vec::<usize>::new();
-        //------PBR-MATERIAL--Tensor
-        let materials_shape: Vec<usize> = vec![TOTAL_MATERIAL_FLOATS];
-        let materials_strides: Vec<usize> = Vec::<usize>::new();
-
-        // Der output-Tensor für deine Pixel-Daten
-        let shape: Vec<usize> = vec![total_pixels];
-        let strides: Vec<usize> = Vec::<usize>::new();
-
-// ✅ Der offizielle und sauberste Weg für 3D-Dimensionen in CubeCL 0.11
-let cube_dim = CubeDim::new_3d(16, 4, 1);
-
-
-// =========================================================================
-        // PIPELINE LAUNCH
-        // =========================================================================
         unsafe {
             kernel::raymarch_sdf_kernel::launch(
-                &client,
-                CubeCount::Static((width + 15) / 16, (height + 3) / 4, 1),
+                &self.client,
+                cube_count,
                 cube_dim,
-                
-                TensorArg::from_raw_parts(output_handle.clone(), shape.into(), strides.into()),
-                TensorArg::from_raw_parts(meta_handle.clone(), meta_shape.into(), meta_strides.into()),
-                TensorArg::from_raw_parts(slots_handle.clone(), slots_shape.into(), slots_strides.into()),
-                // 🟢 HIER: Der dritte Tensor wird in die Pipeline injiziert
-                TensorArg::from_raw_parts(materials_handle.clone(), materials_shape.into(), materials_strides.into()),
-                
+                output_arg,
+                meta_arg,
+                slots_arg,
+                materials_arg,
                 time, 
-        width, 
-        height, 
-        current_shadow_mode,
-        cam_x, 
-        cam_y, 
-        cam_z, 
-        dynamic_blend_factor, 
-        enable_ao_mode,
-        cam_yaw, 
-        cam_pitch, 
-        light_intensity, 
-        ambient_strength,
-        enable_key, 
-        enable_fill, 
-        enable_rim,
-    );
+                width, 
+                height, 
+                current_shadow_mode,
+                cam_x, 
+                cam_y, 
+                cam_z, 
+                dynamic_blend_factor, 
+                enable_ao_mode,
+                cam_yaw, 
+                cam_pitch, 
+                light_intensity, 
+                ambient_strength,
+                enable_key, 
+                enable_fill, 
+                enable_rim,
+            );
+        }
+        
+        // Synchronize to ensure compute is done before render
+        let _ = self.client.sync();
+    }
+
+fn render(&mut self) {
+//  Berechne die echte Delta-Time seit dem letzten Frame
+   // let now = Instant::now();
+   // let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
+   // self.last_frame_time = now; // Zeitstempel sofort für das nächste Frame aktualisieren
+
+    //  Erhöhe die Gesamtzeit flüssig um die vergangene Zeit
+    // (1.0 ist die normale Geschwindigkeit. Erhöhe es, falls die Animation schneller sein soll)
+   // self.total_time += delta_time * 1.0;
+
+    // 1. Hole den aktuellen Status der Surface-Textur (WGPU v30 Syntax)
+    let current_surface = self.surface.get_current_texture();
+    
+    // Extrahiere die eigentliche SurfaceTexture
+    let output = match current_surface {
+        wgpu::CurrentSurfaceTexture::Success(texture) => texture,
+        wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
+        other => {
+            eprintln!("Failed to acquire surface texture: {:?}", other);
+            return;
+        }
+    };
+    
+    // View für den RenderPass erstellen
+    let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    // 2. Extrahiere den nativen wgpu::Buffer aus dem CubeCL Handle
+    let managed_resource = self.client.get_resource(self.output_handle.clone()).unwrap();
+    let wgpu_resource = managed_resource.resource();
+    
+    let src_wgpu_buffer = &wgpu_resource.buffer;
+    let buffer_offset = wgpu_resource.offset;
+
+    // 3. Erstelle die Bind-Group mit dem ECHTEN CubeCL Ausgabe-Buffer
+    self.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Screen Bind Group"),
+        layout: &self.bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: src_wgpu_buffer,
+                    offset: buffer_offset,
+                    size: None,
+                }),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &self.resolution_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            },
+        ],
+    });
+
+    // 4. Command Encoder und Render Pass instanziieren
+    let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Render Encoder"),
+    });
+
+    {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Screen Render Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.bind_group, &[]);
+        render_pass.draw(0..3, 0..1); // Fullscreen Dreieck zeichnen
+    }
+
+    // 5. Befehle abschicken
+    self.queue.submit(std::iter::once(encoder.finish()));
+    
+    // 🟢 JETZT KORREKT FÜR WGPU v30: Wir übergeben die Textur der Queue zur Präsentation!
+    self.queue.present(output);
+    
+    self.frame_counter += 1;
+    //self.last_frame_time = Instant::now(); // ❌ DIESE ZEILE BITTE LÖSCHEN! implemented delta time at top.
 }
 
-// 3. Synchronisation und Read-Back
-let _ = client.sync();
-let mut bytes_vec = client.read(vec![output_handle.clone()]);
+}
 
-if let Some(bytes) = bytes_vec.pop() {
-    let raw_bytes: &[u8] = &*bytes;
-    if raw_bytes.len() >= byte_size {
-        let results: &[u32] = bytemuck::cast_slice(&raw_bytes[..byte_size]);
-        let mut buffer = surface.buffer_mut().unwrap();
-        buffer.copy_from_slice(results);
-        buffer.present().unwrap();
+impl ApplicationHandler for App {
+    // Wird vom OS aufgerufen, sobald die Grafik-Infrastruktur bereit ist
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.app_state.is_none() {
+            // Fenster-Attribute modern in v0.30 definieren
+            let window_attributes = Window::default_attributes()
+                .with_title("SDF Demo - Zero Copy PBR Raymarching")
+                .with_inner_size(winit::dpi::LogicalSize::new(960, 540));
+            
+            // Winit 0.30 erzeugt das Fenster über das event_loop-Target
+            let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+            // 🟢 WICHTIG: Maus im Fenster einsperren und verstecken
+        // Das deaktiviert die OS-Palm-Rejection und aktiviert Raw Input!
+//let _ = window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
+        //let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None); 
+        window.set_cursor_visible(false);
+        // 🟢 NEU: Winit zwingen, Raw Input direkt vom Linux-Kernel zu lesen!
+        // Das überspringt die Drosselung der Desktop-Umgebung komplett.
+        event_loop.listen_device_events(winit::event_loop::DeviceEvents::Always);
+
+
+            // Initialisiere deine bestehende Application::new via pollster
+            let app = pollster::block_on(Application::new(window));
+            self.app_state = Some(app);
+        }
+    }
+      
+
+    // Verarbeitet alle Ereignisse des Fensters
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        // Falls die App noch nicht initialisiert ist (vor resumed), ignorieren
+        let app = match &mut self.app_state {
+            Some(a) => a,
+            None => return,
+        };
+
+       // Innerhalb von impl ApplicationHandler for App -> fn window_event:
+
+        match event {
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+            }
+
+            // Tastatur-Events weiterleiten
+            WindowEvent::KeyboardInput { event: key_event, .. } => {
+                self.input_manager.handle_key_event(&key_event, event_loop, app);
+            }
+         //   // 🟢 NEU & LÖSUNG FÜR WAYLAND: Mausbewegung synchron im Fenster verarbeiten
+          //  WindowEvent::CursorMoved { position, .. } => {
+           //     self.input_manager.handle_window_mouse_move(position.x, position.y, app);
+          //  }
+
+                         // 🟢 DER RENDER-LOOP: Verarbeitet Tastatur + Linux-Maus perfekt gleichzeitig
+            // Der Render- und Rechen-Loop
+            WindowEvent::RedrawRequested => {
+                self.input_manager.update_camera_movement(app);
+                app.update_compute();
+                app.render();
+                app.window.request_redraw();
+            }
+
+            WindowEvent::Resized(size) => {
+                app.resize(size.width, size.height);
+            }
+
+            _ => {}
+        }
+
     }
 }
 
-window.request_redraw();
-std::thread::sleep(Duration::from_millis(8));
+// Die neue, extrem aufgeräumte main-Funktion
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let event_loop = EventLoop::new().unwrap();
+    
+    // Instanziere unseren Handler
+    let mut app = App {
+        app_state: None,
+        input_manager: InputManager::new(5.0f32, 0.002f32), // 🟢 0.002 als Mausempfindlichkeit
+    };
+    
+    // run_app startet den deklarativen Lebenszyklus
+    event_loop.run_app(&mut app)?;
+
+    Ok(())
 }
-_ => {}}})?;Ok(())}

@@ -419,10 +419,10 @@ pub fn calculate_ao(p: Vec3, normal: Vec3, time: f32, blend_factor: f32, meta: &
 
 #[cube(launch)]
 pub fn raymarch_sdf_kernel(
-    output: &mut Tensor<u32>,
-    meta: &Tensor<f32>,   // 🟢 REPARIERT: Eindeutiger Metadaten-Tensor
-    slots: &Tensor<f32>,  // 🟢 REPARIERT: Ausgerichteter Geometrie-Tensor
-    materials: &Tensor<f32>, // 🟢 FIX 1: Hier fehlte der PBR-Material-Tensor im Funktionskopf!
+    output: &mut Tensor<f32>, // 🟢 OPTIMIERT: Jetzt f32 statt u32!
+    meta: &Tensor<f32>,   
+    slots: &Tensor<f32>,  
+    materials: &Tensor<f32>, 
     time: f32,
     width: u32,
     height: u32,
@@ -480,7 +480,6 @@ pub fn raymarch_sdf_kernel(
         let mut hit_g = f32::new(0.0);
         let mut hit_b = f32::new(0.0);
         
-        // 🟢 FIX: Diese primitiven Variablen registrieren und aus der Schleife retten!
         let mut hit_rough = f32::new(0.5);
         let mut hit_metal = f32::new(0.0);
         let mut hit_emiss = f32::new(0.0);
@@ -502,7 +501,6 @@ pub fn raymarch_sdf_kernel(
             hit_r     = step_res.r;
             hit_g     = step_res.g;
             hit_b     = step_res.b;
-            // 🟢 Zuweisung der neuen PBR-Kanäle auf primitiver Ebene innerhalb der Schleife
             hit_rough = step_res.roughness;
             hit_metal = step_res.metallic;
             hit_emiss = step_res.emissive;
@@ -518,7 +516,7 @@ pub fn raymarch_sdf_kernel(
                 break; 
             }
             ray_step += u32::new(1);
-        } // Loop-Ende
+        }
 
         let bg_r = f32::new(0.35) - uv_y * f32::new(0.10);
         let bg_g = f32::new(0.45) - uv_y * f32::new(0.12);
@@ -530,10 +528,8 @@ pub fn raymarch_sdf_kernel(
 
         if hit_dist < f32::new(40.0) {
             let p = ro.add(final_rd.scale(hit_dist));
-            // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an die Normalenberechnung
-            //let normal = scene_sdf_normal(p.clone(), t_val, b_factor, meta, slots);
-            // 🟢 FIX 3: Materialien an die Normalenberechnung durchreichen
             let normal = scene_sdf_normal(p.clone(), t_val, b_factor, meta, slots, materials);
+            
             let key_light_pos  = Vec3::new(f32::new(4.0), f32::new(7.0), f32::new(-4.0));
             let fill_light_pos = Vec3::new(f32::new(-5.0), f32::new(3.0), f32::new(-3.0));
             let rim_light_pos  = Vec3::new(f32::new(0.0), f32::new(6.0), f32::new(5.0)); 
@@ -542,43 +538,26 @@ pub fn raymarch_sdf_kernel(
             let fill_dir = fill_light_pos.sub(p.clone()).normalize();
             let rim_dir  = rim_light_pos.sub(p.clone()).normalize();
             
-            let mut diff_key  = normal.dot(key_dir).max(f32::new(0.0));
+            let mut diff_key  = normal.dot(key_dir.clone()).max(f32::new(0.0));
             let diff_fill = normal.dot(fill_dir).max(f32::new(0.0));
             let diff_rim  = normal.dot(rim_dir).max(f32::new(0.0));
             
-            // 🟢 PBR SPEBULAR BLENDUNG:
-            // Berechne die Blickrichtung des Auges/Kamera (View Direction)
             let view_dir = final_rd.scale(f32::new(-1.0)).normalize();
-            
-            // Halbwertsvektor für Blinn-Phong Specular (Key Light)
-            let half_vec = key_dir.clone().add(view_dir).normalize();
+            let half_vec = key_dir.clone().add(view_dir.clone()).normalize();
             let spec_angle = normal.dot(half_vec).max(f32::new(0.0));
             
-            // Schärfe des Highlights wird umgekehrt proportional zur Rauheit berechnet!
-            // Ein glattes Objekt (roughness 0.1) bekommt einen extrem scharfen, gleißenden Reflex Exponent 128.
-                        // ✅ BEHOBEN: Nutzt die geretteten primitiven Variablen aus der Schleife
             let spec_power = f32::new(1.0) / hit_rough.max(f32::new(0.01));
             let specular_highlight = spec_angle.powf(spec_power * f32::new(15.0)) * hit_spec;
 
-           
-            //---SHADOW
             if shadow_mode == u32::new(1) {
                 let offset_p = p.add(normal.scale(f32::new(0.02)));
-                // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an die Schattenberechnung
-               // let shadow_factor = calculate_soft_shadow(offset_p, key_dir, t_val, b_factor, meta, slots);
-               // 🟢 FIX 4: Materialien an Weichschatten durchreichen
                 let shadow_factor = calculate_soft_shadow(offset_p, key_dir, t_val, b_factor, meta, slots, materials);
-                
                 diff_key *= shadow_factor;
             }
             
             let mut ao_factor = f32::new(1.0);
             if enable_ao_mode == u32::new(1) {
-                // 🟢 REPARIERT: Übergabe der zwei getrennten Tensoren an Ambient Occlusion
-                //ao_factor = calculate_ao(p, normal, t_val, b_factor, meta, slots);
-                // 🟢 FIX 5: Materialien an Ambient Occlusion durchreichen
                 ao_factor = calculate_ao(p, normal, t_val, b_factor, meta, slots, materials);
-           
             }
             
             let mut key_r = f32::new(1.00); let mut key_g = f32::new(0.95); let mut key_b = f32::new(0.85);
@@ -589,57 +568,35 @@ pub fn raymarch_sdf_kernel(
             if enable_fill == u32::new(0) { fill_r = f32::new(0.0); fill_g = f32::new(0.0); fill_b = f32::new(0.0); }
             if enable_rim == u32::new(0)  { rim_r = f32::new(0.0); rim_g = f32::new(0.0); rim_b = f32::new(0.0); }
             
-                       // =========================================================================
-            // DYNAMISCHE ALBEDO- & MATERIAL-ÜBERTRAGUNG (Integrierte PBR-Lichtberechnung)
-            // =========================================================================
-            let mat_r = hit_r;
-            let mat_g = hit_g;
-            let mat_b = hit_b;
-            
             let l_intensity = light_intensity;
+            let amb_strength = ambient_strength;
             
-            // 🟢 PBR SPECULAR: Berechne den Blickrichtungsvektor (View Direction)
-            let view_dir = final_rd.scale(f32::new(-1.0)).normalize();
+            // PBR Beleuchtungs-Kombination
+            let mut lighting_r = fill_r * diff_fill + rim_r * diff_rim + key_r * diff_key * l_intensity;
+            let mut lighting_g = fill_g * diff_fill + rim_g * diff_rim + key_g * diff_key * l_intensity;
+            let mut lighting_b = fill_b * diff_fill + rim_b * diff_rim + key_b * diff_key * l_intensity;
             
-            // Halbwertsvektor für das Blinn-Phong Glanzlicht des Key-Lights
-            let half_vec = key_dir.clone().add(view_dir).normalize();
-            let spec_angle = normal.dot(half_vec).max(f32::new(0.0));
-            
-            // Die Schärfe des Highlights wird umgekehrt proportional zur Rauheit skaliert
-            let spec_power = f32::new(1.0) / hit_rough.max(f32::new(0.01));
-            let specular_highlight = spec_angle.powf(spec_power * f32::new(15.0)) * hit_spec;
-            
-            // Integration aller Lichtquellen inklusive des neuen Glanzlichts und Eigenleuchtens (Emissive)
-            let lit_r = (key_r * diff_key * l_intensity) + (fill_r * diff_fill * f32::new(0.7)) + (rim_r * diff_rim.powf(f32::new(3.0)) * f32::new(1.5)) + specular_highlight + hit_emiss;
-            let lit_g = (key_g * diff_key * l_intensity) + (fill_g * diff_fill * f32::new(0.7)) + (rim_g * diff_rim.powf(f32::new(3.0)) * f32::new(1.5)) + specular_highlight + hit_emiss;
-            let lit_b = (key_b * diff_key * l_intensity) + (fill_b * diff_fill * f32::new(0.7)) + (rim_b * diff_rim.powf(f32::new(3.0)) * f32::new(1.5)) + specular_highlight + hit_emiss;
-            
-            let a_strength = ambient_strength;
-            let final_r = mat_r * (a_strength * ao_factor + lit_r * ao_factor);
-            let final_g = mat_g * (a_strength * ao_factor + lit_g * ao_factor);
-            let final_b = mat_b * (a_strength * ao_factor + lit_b * ao_factor);
-            
-            let mut fog = (f32::new(40.0) - hit_dist) / (f32::new(40.0) - f32::new(15.0));
-            if fog > f32::new(1.0) { fog = f32::new(1.0); }
-            if fog < f32::new(0.0) { fog = f32::new(0.0); }
-            
-            final_color_x = final_r * fog + bg_r * (f32::new(1.0) - fog);
-            final_color_y = final_g * fog + bg_g * (f32::new(1.0) - fog);
-            final_color_z = final_b * fog + bg_b * (f32::new(1.0) - fog);
+            // Ambient Occlusion und Material-Albedo einrechnen
+            final_color_x = (hit_r * (lighting_r + amb_strength) + specular_highlight) * ao_factor + hit_emiss;
+            final_color_y = (hit_g * (lighting_g + amb_strength) + specular_highlight) * ao_factor + hit_emiss;
+            final_color_z = (hit_b * (lighting_b + amb_strength) + specular_highlight) * ao_factor + hit_emiss;
         }
 
-        let r_u32 = u32::cast_from(final_color_x.min(f32::new(1.0)).max(f32::new(0.0)) * f32::new(255.0));
-        let g_u32 = u32::cast_from(final_color_y.min(f32::new(1.0)).max(f32::new(0.0)) * f32::new(255.0));
-        let b_u32 = u32::cast_from(final_color_z.min(f32::new(1.0)).max(f32::new(0.0)) * f32::new(255.0));
-        let packed_pixel = (r_u32 << u32::new(16)) | (g_u32 << u32::new(8)) | b_u32;
-        
-        let x_usize = usize::cast_from(x);
-        let y_usize = usize::cast_from(y);
-        let width_usize = usize::cast_from(width);
-        let pixel_index = y_usize * width_usize + x_usize;
-        
-        output[pixel_index] = packed_pixel;
+        // 🟢 NEU: Direkte, lineare Zuweisung im f32 VRAM-Puffer
+       // 1. Hole die Thread-Koordinaten direkt als usize
+        let x_idx = usize::cast_from(x);
+        let y_idx = usize::cast_from(y);
+        let w_idx = usize::cast_from(w_val);
+
+        // 2. Berechne den Index direkt in einem Rutsch als usize (Kein u32-Zwischenschritt!)
+        let pixel_index = (y_idx * w_idx + x_idx) * usize::new(3);
+
+        // 3. Direktes Schreiben ohne Typprobleme
+        output[pixel_index] = final_color_x;
+        output[pixel_index + usize::new(1)] = final_color_y;
+        output[pixel_index + usize::new(2)] = final_color_z;
     }
 }
+
 
 
