@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+wgpui = { version = "0.3.6" }
+wgpui-kit = "0.6.1"
 wgpu = { version = "30.0", default-features = false, features = ["vulkan", "wgsl"] }
 cubecl = { version = "0.11.0-pre.2", features = ["wgpu"] }
 cubecl-wgpu = "0.11.0-pre.2"
