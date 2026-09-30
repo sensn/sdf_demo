@@ -1,12 +1,11 @@
-use std::time::Instant;
 use crossbeam_channel::Receiver;
 use crate::ApplicationState;
 
+/// Handles camera movement. Keyboard state (WASD) is owned by
+/// `ApplicationState` and updated via wgpui key events in `main.rs`
+/// (wgpui owns the winit event loop, so there is no direct winit access).
+/// Mouse rotation is read from a raw evdev thread (`/dev/input/mice`).
 pub struct InputManager {
-    w_pressed: bool,
-    a_pressed: bool,
-    s_pressed: bool,
-    d_pressed: bool,
     pub camera_speed: f32,
     pub mouse_sensitivity: f32,
     mouse_receiver: Receiver<(f32, f32)>,
@@ -23,7 +22,7 @@ impl InputManager {
                     if std::io::Read::read_exact(&mut file, &mut buffer).is_ok() {
                         let dx = buffer[1] as i8 as f32;
                         let dy = buffer[2] as i8 as f32;
-                        
+
                         if dx != 0.0 || dy != 0.0 {
                             let _ = sender.send((dx, dy));
                         }
@@ -33,10 +32,6 @@ impl InputManager {
         });
 
         Self {
-            w_pressed: false,
-            a_pressed: false,
-            s_pressed: false,
-            d_pressed: false,
             camera_speed,
             mouse_sensitivity,
             mouse_receiver: receiver,
@@ -44,13 +39,13 @@ impl InputManager {
     }
 
     pub fn update_camera_movement(&mut self, state: &mut ApplicationState, dt: f32) {
-        // 1. Rotation aus dem Linux‑Kernel‑Thread entleeren
+        // --- 1. ROTATION (drain the raw mouse thread) ---
         let mut total_dx = 0.0;
         let mut total_dy = 0.0;
 
         while let Ok((dx, dy)) = self.mouse_receiver.try_recv() {
             total_dx += dx;
-            total_dy -= dy; 
+            total_dy -= dy;
         }
 
         state.cam_yaw += total_dx * self.mouse_sensitivity;
@@ -59,25 +54,25 @@ impl InputManager {
         let max_pitch = 89.0f32.to_radians();
         state.cam_pitch = state.cam_pitch.clamp(-max_pitch, max_pitch);
 
-        // 2. Bewegung verarbeiten (W, A, S, D)
+        // --- 2. MOVEMENT (W, A, S, D flags from wgpui key events) ---
         let move_dist = self.camera_speed * dt;
 
         let cos_yaw = state.cam_yaw.cos();
         let sin_yaw = state.cam_yaw.sin();
 
-        if self.w_pressed {
+        if state.w_pressed {
             state.cam_x += sin_yaw * move_dist;
             state.cam_z += cos_yaw * move_dist;
         }
-        if self.s_pressed {
+        if state.s_pressed {
             state.cam_x -= sin_yaw * move_dist;
             state.cam_z -= cos_yaw * move_dist;
         }
-        if self.a_pressed {
+        if state.a_pressed {
             state.cam_x -= cos_yaw * move_dist;
             state.cam_z += sin_yaw * move_dist;
         }
-        if self.d_pressed {
+        if state.d_pressed {
             state.cam_x += cos_yaw * move_dist;
             state.cam_z -= sin_yaw * move_dist;
         }
