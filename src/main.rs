@@ -495,7 +495,9 @@ fn main() {
                     bg_g: 0.45,
                     bg_b: 0.60,
                     fog_density: 0.5,
-                    fog_enabled: 1,
+                    // Original-Kernel hatte keinen Nebel-Block → default AUS,
+                    // damit die Szene exakt wie das Original aussieht.
+                    fog_enabled: 0,
 
                     // 🟢 TENSOR 5: Tempel-Architektur-Defaults
                     pillar_dist: 5.0,
@@ -681,6 +683,91 @@ fn main() {
                         let env_handle = client.empty(16 * 4);
                         let arch_handle = client.empty(12 * 4);
                         let fold_handle = client.empty(4 * 4);
+
+                        // =================================================================
+                        // 🟢 TENSOR 4/5/6: DEFAULT-WERTE IN VRAM SCHREIBEN
+                        // Die Defaults stammen 1:1 aus den ursprünglich hardcodierten
+                        // Kernel-Konstanten (siehe ApplicationState-Init). Schreibt jede
+                        // Frame die aktuellen State-Werte → Q/E, F/R, O/L, N wirken
+                        // direkt auf dem GPU-Register. Nutzt das vorhandene
+                        // get_resource()-Muster + wgpu queue (gleiche Queue wie
+                        // cubecl → Schreibreihenfolge vor Kernel-Launch garantiert).
+                        // =================================================================
+                        // Tensor 4 (Umwelt): Licht-Pos, Intensität, Key-RGB, Ambient,
+                        // BG-RGB, Nebel-Dichte, Nebel-Schalter, Padding
+                        let env_data: [f32; 16] = [
+                            s.key_light_x,
+                            s.key_light_y,
+                            s.key_light_z,
+                            s.light_intensity,
+                            s.key_r,
+                            s.key_g,
+                            s.key_b,
+                            s.ambient_strength,
+                            s.bg_r,
+                            s.bg_g,
+                            s.bg_b,
+                            s.fog_density,
+                            s.fog_enabled as f32,
+                            0.0,
+                            0.0,
+                            0.0,
+                        ];
+                        // Tensor 5 (Architektur): Säulen, Raum, Bögen, Dekor
+                        let arch_data: [f32; 12] = [
+                            s.pillar_dist,
+                            s.pillar_thick,
+                            s.room_height,
+                            s.ceiling_thick,
+                            s.arch_radius,
+                            s.arch_height,
+                            s.decor_freq,
+                            s.decor_depth,
+                            s.decor_thick,
+                            0.0,
+                            0.0,
+                            0.0,
+                        ];
+                        // Tensor 6 (Faltung): Zellgröße, halbe Zelle, Faltungs-Tempo
+                        let fold_data: [f32; 4] = [
+                            s.cell_size,
+                            s.cell_size * 0.5,
+                            s.fold_speed,
+                            0.0,
+                        ];
+                        // Meta: active_slots = 0 → nur statische Architektur rendert
+                        // (deterministisch, verlässt sich nicht auf zeroed VRAM).
+                        // Achtung: meta_handle = client.empty(4) = 4 Bytes = 1 f32!
+                        let meta_data: [f32; 1] = [0.0];
+
+                        let env_resource = client.get_resource(env_handle.clone()).unwrap();
+                        let env_wgpu = env_resource.resource();
+                        queue.write_buffer(
+                            &env_wgpu.buffer,
+                            env_wgpu.offset,
+                            bytemuck::cast_slice(&env_data),
+                        );
+                        let arch_resource = client.get_resource(arch_handle.clone()).unwrap();
+                        let arch_wgpu = arch_resource.resource();
+                        queue.write_buffer(
+                            &arch_wgpu.buffer,
+                            arch_wgpu.offset,
+                            bytemuck::cast_slice(&arch_data),
+                        );
+                        let fold_resource = client.get_resource(fold_handle.clone()).unwrap();
+                        let fold_wgpu = fold_resource.resource();
+                        queue.write_buffer(
+                            &fold_wgpu.buffer,
+                            fold_wgpu.offset,
+                            bytemuck::cast_slice(&fold_data),
+                        );
+                        let meta_resource = client.get_resource(meta_handle.clone()).unwrap();
+                        let meta_wgpu = meta_resource.resource();
+                        queue.write_buffer(
+                            &meta_wgpu.buffer,
+                            meta_wgpu.offset,
+                            bytemuck::cast_slice(&meta_data),
+                        );
                         let output_arg = unsafe {
                             TensorArg::from_raw_parts(
                                 output_handle.clone(),
