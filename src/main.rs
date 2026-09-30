@@ -118,10 +118,17 @@ impl Render for SurfaceExample {
                         "a" | "A" => s.a_pressed = true,
                         "s" | "S" => s.s_pressed = true,
                         "d" | "D" => s.d_pressed = true,
-                        "1" => s.enable_key = if s.enable_key == 1 { 0 } else { 1 },
-                        "2" => s.enable_fill = if s.enable_fill == 1 { 0 } else { 1 },
-                        "3" => s.enable_rim = if s.enable_rim == 1 { 0 } else { 1 },
-                        "4" => {
+                        // Ignore OS key-repeat for toggles (`is_held` is true on repeats).
+                        "1" if !event.is_held => {
+                            s.enable_key = if s.enable_key == 1 { 0 } else { 1 }
+                        }
+                        "2" if !event.is_held => {
+                            s.enable_fill = if s.enable_fill == 1 { 0 } else { 1 }
+                        }
+                        "3" if !event.is_held => {
+                            s.enable_rim = if s.enable_rim == 1 { 0 } else { 1 }
+                        }
+                        "4" if !event.is_held => {
                             s.current_shadow_mode = if s.current_shadow_mode == 1 { 0 } else { 1 }
                         }
                         _ => {}
