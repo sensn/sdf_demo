@@ -49,6 +49,34 @@ pub struct ApplicationState {
     pub enable_fill: u32,
     pub enable_rim: u32,
     pub dynamic_blend_factor: f32,
+
+    // 🟢 TENSOR 4: Umwelt-Register (Environmental Control)
+    pub key_light_x: f32,
+    pub key_light_y: f32,
+    pub key_light_z: f32,
+    pub key_r: f32,
+    pub key_g: f32,
+    pub key_b: f32,
+    pub bg_r: f32,
+    pub bg_g: f32,
+    pub bg_b: f32,
+    pub fog_density: f32,
+    pub fog_enabled: u32,
+
+    // 🟢 TENSOR 5: Tempel-Architektur (data-driven)
+    pub pillar_dist: f32,
+    pub pillar_thick: f32,
+    pub room_height: f32,
+    pub ceiling_thick: f32,
+    pub arch_radius: f32,
+    pub arch_height: f32,
+    pub decor_freq: f32,
+    pub decor_depth: f32,
+    pub decor_thick: f32,
+
+    // 🟢 TENSOR 6: Unendliche Raumfaltung (modulo grid)
+    pub cell_size: f32,
+    pub fold_speed: f32,
 }
 
 struct SurfaceExample {
@@ -94,6 +122,7 @@ impl Render for SurfaceExample {
         let state_ao_toggle = self.state.clone();
         let state_rim_toggle = self.state.clone();
         let state_shadow_toggle = self.state.clone();
+        let state_fog_toggle = self.state.clone();
 
         let state_read = self.state.lock().unwrap();
 
@@ -103,6 +132,10 @@ impl Render for SurfaceExample {
         let ao_on = state_read.enable_ao_mode == 1;
         let rim_on = state_read.enable_rim == 1;
         let shadow_on = state_read.current_shadow_mode == 1;
+        let fog_on = state_read.fog_enabled == 1;
+        let light_int_val = state_read.light_intensity;
+        let ambient_val = state_read.ambient_strength;
+        let fog_dens_val = state_read.fog_density;
 
         div()
             .id("root")
@@ -130,6 +163,32 @@ impl Render for SurfaceExample {
                         }
                         "4" if !event.is_held => {
                             s.current_shadow_mode = if s.current_shadow_mode == 1 { 0 } else { 1 }
+                        }
+                        // 🟢 TENSOR 4: Umwelt-Steuerung (Blueprint: Environmental Control)
+                        // Q/E : Licht-Intensität runter/hoch
+                        "q" if !event.is_held => {
+                            s.light_intensity = (s.light_intensity - 0.1).max(0.0)
+                        }
+                        "e" if !event.is_held => {
+                            s.light_intensity = (s.light_intensity + 0.1).min(3.0)
+                        }
+                        // F/R : Ambient-Stärke runter/hoch
+                        "f" if !event.is_held => {
+                            s.ambient_strength = (s.ambient_strength - 0.05).max(0.0)
+                        }
+                        "r" if !event.is_held => {
+                            s.ambient_strength = (s.ambient_strength + 0.05).min(1.0)
+                        }
+                        // O/L : Nebel-Dichte runter/hoch
+                        "o" if !event.is_held => {
+                            s.fog_density = (s.fog_density - 0.1).max(0.0)
+                        }
+                        "l" if !event.is_held => {
+                            s.fog_density = (s.fog_density + 0.1).min(2.0)
+                        }
+                        // N : Nebel an/aus
+                        "n" if !event.is_held => {
+                            s.fog_enabled = if s.fog_enabled == 1 { 0 } else { 1 }
                         }
                         _ => {}
                     }
@@ -297,6 +356,89 @@ impl Render for SurfaceExample {
                                     .text_color(rgb(0x8a92a6))
                                     .text_xs()
                                     .child("• Key 4 : Toggle Hard Shadows"),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x00ffcc))
+                                    .text_xs()
+                                    .child("• Q / E : Light Intensity -/+"),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x00ffcc))
+                                    .text_xs()
+                                    .child("• F / R : Ambient Strength -/+"),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x00ffcc))
+                                    .text_xs()
+                                    .child("• O / L : Fog Density -/+"),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x00ffcc))
+                                    .text_xs()
+                                    .child("• N : Toggle Fog"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .bg(rgb(0x1a2333))
+                            .p_3()
+                            .rounded_md()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                div()
+                                    .text_color(rgb(0x00ffcc))
+                                    .text_sm()
+                                    .child("Environment (Tensor 4):"),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x8a92a6))
+                                    .text_xs()
+                                    .child(format!(
+                                        "• Light Intensity: {:.2}",
+                                        light_int_val
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x8a92a6))
+                                    .text_xs()
+                                    .child(format!("• Ambient: {:.2}", ambient_val)),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x8a92a6))
+                                    .text_xs()
+                                    .child(format!("• Fog Density: {:.2}", fog_dens_val)),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .justify_between()
+                                    .items_center()
+                                    .child(
+                                        div().text_color(rgb(0xffffff)).child("Fog Enabled"),
+                                    )
+                                    .child(
+                                        Button::new("fog_btn")
+                                            .label(if fog_on { "ON" } else { "OFF" })
+                                            .on_click(move |_, _, _| {
+                                                if let Ok(mut s) = state_fog_toggle.lock() {
+                                                    s.fog_enabled = if s.fog_enabled == 1 {
+                                                        0
+                                                    } else {
+                                                        1
+                                                    };
+                                                }
+                                            }),
+                                    ),
                             ),
                     ),
             )
@@ -341,6 +483,34 @@ fn main() {
                     enable_fill: 1,
                     enable_rim: 1,
                     dynamic_blend_factor: 0.0,
+
+                    // 🟢 TENSOR 4: Umwelt-Defaults (Blueprint: Environmental Control Tensor)
+                    key_light_x: 4.0,
+                    key_light_y: 7.0,
+                    key_light_z: -4.0,
+                    key_r: 1.00,
+                    key_g: 0.95,
+                    key_b: 0.85,
+                    bg_r: 0.35,
+                    bg_g: 0.45,
+                    bg_b: 0.60,
+                    fog_density: 0.5,
+                    fog_enabled: 1,
+
+                    // 🟢 TENSOR 5: Tempel-Architektur-Defaults
+                    pillar_dist: 5.0,
+                    pillar_thick: 0.6,
+                    room_height: 3.0,
+                    ceiling_thick: 0.1,
+                    arch_radius: 3.2,
+                    arch_height: 1.0,
+                    decor_freq: 2.0,
+                    decor_depth: 0.03,
+                    decor_thick: 0.01,
+
+                    // 🟢 TENSOR 6: Raumfaltungs-Defaults
+                    cell_size: 10.0,
+                    fold_speed: 1.0,
                 }));
                 let render_state = shared_state.clone();
                 thread::spawn(move || {
@@ -504,6 +674,13 @@ fn main() {
                         let meta_handle = client.empty(4);
                         let slots_handle = client.empty(800 * 4);
                         let materials_handle = client.empty(100 * 4);
+                        // 🟢 TENSOR 4/5/6: Umwelt-, Architektur- und Faltungs-Register.
+                        // Gleiche empty()->TensorArg-Pattern wie meta/slots/materials.
+                        // 16 f32 = 64 Bytes (Umwelt), 12 f32 = 48 Bytes (Architektur),
+                        // 4 f32 = 16 Bytes (Faltung).
+                        let env_handle = client.empty(16 * 4);
+                        let arch_handle = client.empty(12 * 4);
+                        let fold_handle = client.empty(4 * 4);
                         let output_arg = unsafe {
                             TensorArg::from_raw_parts(
                                 output_handle.clone(),
@@ -532,6 +709,27 @@ fn main() {
                                 Shape::from(&[100usize]),
                             )
                         };
+                        let env_arg = unsafe {
+                            TensorArg::from_raw_parts(
+                                env_handle.clone(),
+                                Strides::from(&[1usize]),
+                                Shape::from(&[16usize]),
+                            )
+                        };
+                        let arch_arg = unsafe {
+                            TensorArg::from_raw_parts(
+                                arch_handle.clone(),
+                                Strides::from(&[1usize]),
+                                Shape::from(&[12usize]),
+                            )
+                        };
+                        let fold_arg = unsafe {
+                            TensorArg::from_raw_parts(
+                                fold_handle.clone(),
+                                Strides::from(&[1usize]),
+                                Shape::from(&[4usize]),
+                            )
+                        };
                         unsafe {
                             kernel::raymarch_sdf_kernel::launch(
                                 &client,
@@ -541,6 +739,9 @@ fn main() {
                                 meta_arg,
                                 slots_arg,
                                 materials_arg,
+                                env_arg,
+                                arch_arg,
+                                fold_arg,
                                 time,
                                 dw,
                                 dh,
@@ -552,8 +753,6 @@ fn main() {
                                 s.enable_ao_mode,
                                 s.cam_yaw,
                                 s.cam_pitch,
-                                s.light_intensity,
-                                s.ambient_strength,
                                 s.enable_key,
                                 s.enable_fill,
                                 s.enable_rim,

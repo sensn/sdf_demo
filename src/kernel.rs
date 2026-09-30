@@ -167,9 +167,12 @@ pub fn scene_sdf(
     meta: &Tensor<f32>,
     slots: &Tensor<f32>,
     materials: &Tensor<f32>, // 🟢 Dritter Tensor empfangen
+    arch_params: &Tensor<f32>, // 🟢 TENSOR 5: Tempel-Architektur
+    fold_params: &Tensor<f32>, // 🟢 TENSOR 6: Unendliche Raumfaltung
 ) -> SdfResult {
-    let cell_size = f32::new(10.0);
-    let half_cell = cell_size * f32::new(0.5);
+    // 🟢 TENSOR 6: Modulo-Grid-Konstanten dynamisch aus dem Faltungs-Register
+    let cell_size = fold_params[usize::new(0)];
+    let half_cell = fold_params[usize::new(1)];
 
     let grid_p_x = p.x - cell_size * ((p.x + half_cell) / cell_size).floor();
     let grid_p_y = p.y - cell_size * ((p.y + half_cell) / cell_size).floor();
@@ -291,34 +294,42 @@ pub fn scene_sdf(
     };
 
     // =========================================================================
-    // ARCHITEKTUR-GENERIERUNG (Unverändert starr, Farbe: Steingrau 0.7)
+    // 🟢 TENSOR 5: ARCHITEKTUR-GENERIERUNG (Datengetrieben statt starr)
     // =========================================================================
-    let pillar_x = (local_p.x.abs() - f32::new(5.0)).abs() - f32::new(0.6);
-    let pillar_z = (local_p.z.abs() - f32::new(5.0)).abs() - f32::new(0.6);
+    let pillar_dist = arch_params[usize::new(0)];
+    let pillar_thick = arch_params[usize::new(1)];
+    let room_height = arch_params[usize::new(2)];
+    let ceiling_thick = arch_params[usize::new(3)];
+    let arch_radius = arch_params[usize::new(4)];
+    let arch_height = arch_params[usize::new(5)];
+    let decor_freq = arch_params[usize::new(6)];
+    let decor_depth = arch_params[usize::new(7)];
+    let decor_thick = arch_params[usize::new(8)];
+
+    let pillar_x = (local_p.x.abs() - pillar_dist).abs() - pillar_thick;
+    let pillar_z = (local_p.z.abs() - pillar_dist).abs() - pillar_thick;
     let corner_pillars = pillar_x.max(pillar_z);
 
-    let room_floor = local_p.y + f32::new(3.0);
-    let room_ceiling = f32::new(3.0) - local_p.y;
-    let floor_and_ceiling = room_floor.min(room_ceiling) - f32::new(0.1);
+    let room_floor = local_p.y + room_height;
+    let room_ceiling = room_height - local_p.y;
+    let floor_and_ceiling = room_floor.min(room_ceiling) - ceiling_thick;
 
-    let arch_radius = f32::new(3.2);
     let arch_z =
-        (local_p.x * local_p.x + (local_p.y - f32::new(1.0)) * (local_p.y - f32::new(1.0))).sqrt()
+        (local_p.x * local_p.x + (local_p.y - arch_height) * (local_p.y - arch_height)).sqrt()
             - arch_radius;
     let arch_x =
-        (local_p.z * local_p.z + (local_p.y - f32::new(1.0)) * (local_p.y - f32::new(1.0))).sqrt()
+        (local_p.z * local_p.z + (local_p.y - arch_height) * (local_p.y - arch_height)).sqrt()
             - arch_radius;
     let wall_arches = arch_z.min(arch_x);
 
     let mut arch_d = corner_pillars.min(floor_and_ceiling);
     arch_d = arch_d.max(-wall_arches);
 
-    let s1_decor = f32::new(2.0);
-    let pillar_holes = ((local_p.x * s1_decor).sin().abs()
-        + (local_p.y * s1_decor).cos().abs()
-        + (local_p.z * s1_decor).sin().abs())
-        * f32::new(0.03);
-    arch_d = arch_d.max(-(pillar_holes - f32::new(0.01)));
+    let pillar_holes = ((local_p.x * decor_freq).sin().abs()
+        + (local_p.y * decor_freq).cos().abs()
+        + (local_p.z * decor_freq).sin().abs())
+        * decor_depth;
+    arch_d = arch_d.max(-(pillar_holes - decor_thick));
 
     // (Starre Raumarchitektur erhält Standard-PBR-Werte: Mattstein = roughness 0.8, metallic 0.0)
     let architecture = SdfResult {
@@ -392,16 +403,18 @@ pub fn scene_sdf_normal(
     meta: &Tensor<f32>,
     slots: &Tensor<f32>,
     materials: &Tensor<f32>,
+    arch_params: &Tensor<f32>,
+    fold_params: &Tensor<f32>,
 ) -> Vec3 {
     let eps = f32::new(0.002);
-    let d_res = scene_sdf(p.clone(), time, blend_factor, meta, slots, materials);
+    let d_res = scene_sdf(p.clone(), time, blend_factor, meta, slots, materials, arch_params, fold_params);
     let d = d_res.d;
     let p_x = Vec3::new(p.x + eps, p.y, p.z);
     let p_y = Vec3::new(p.x, p.y + eps, p.z);
     let p_z = Vec3::new(p.x, p.y, p.z + eps);
-    let nx = scene_sdf(p_x, time, blend_factor, meta, slots, materials).d - d;
-    let ny = scene_sdf(p_y, time, blend_factor, meta, slots, materials).d - d;
-    let nz = scene_sdf(p_z, time, blend_factor, meta, slots, materials).d - d;
+    let nx = scene_sdf(p_x, time, blend_factor, meta, slots, materials, arch_params, fold_params).d - d;
+    let ny = scene_sdf(p_y, time, blend_factor, meta, slots, materials, arch_params, fold_params).d - d;
+    let nz = scene_sdf(p_z, time, blend_factor, meta, slots, materials, arch_params, fold_params).d - d;
     Vec3::new(nx, ny, nz).normalize()
 }
 
@@ -414,6 +427,8 @@ pub fn calculate_soft_shadow(
     meta: &Tensor<f32>,
     slots: &Tensor<f32>,
     materials: &Tensor<f32>,
+    arch_params: &Tensor<f32>,
+    fold_params: &Tensor<f32>,
 ) -> f32 {
     let mut res = f32::new(1.0);
     let mut t = f32::new(0.04);
@@ -429,7 +444,7 @@ pub fn calculate_soft_shadow(
         let current_rd = rd.clone();
         let p = current_ro.add(current_rd.scale(t));
         // FIX: add PBR_MATERIALS Tensor-ref
-        let sdf_res = scene_sdf(p, time, blend_factor, meta, slots, materials);
+        let sdf_res = scene_sdf(p, time, blend_factor, meta, slots, materials, arch_params, fold_params);
         let h = sdf_res.d;
 
         if h < f32::new(0.001) {
@@ -457,6 +472,8 @@ pub fn calculate_ao(
     meta: &Tensor<f32>,
     slots: &Tensor<f32>,
     materials: &Tensor<f32>,
+    arch_params: &Tensor<f32>,
+    fold_params: &Tensor<f32>,
 ) -> f32 {
     let mut occ = f32::new(0.0);
     let mut sca = f32::new(1.0);
@@ -474,7 +491,7 @@ pub fn calculate_ao(
         let ao_pos = current_p.add(current_normal.scale(hr));
 
         // 🟢 FIX: Nutzen der neuen 2-Tensor-Signatur (meta, slots) statt config
-        let sdf_res = scene_sdf(ao_pos, time, blend_factor, meta, slots, materials);
+        let sdf_res = scene_sdf(ao_pos, time, blend_factor, meta, slots, materials, arch_params, fold_params);
         let dd = sdf_res.d;
 
         occ += (hr - dd) * sca;
@@ -493,6 +510,9 @@ pub fn raymarch_sdf_kernel(
     meta: &Tensor<f32>,
     slots: &Tensor<f32>,
     materials: &Tensor<f32>,
+    env_settings: &Tensor<f32>, // 🟢 TENSOR 4: Umwelt-Parameter (Licht, Ambient, Nebel)
+    arch_params: &Tensor<f32>,  // 🟢 TENSOR 5: Tempel-Architektur
+    fold_params: &Tensor<f32>,  // 🟢 TENSOR 6: Unendliche Raumfaltung
     time: f32,
     width: u32,
     height: u32,
@@ -504,8 +524,6 @@ pub fn raymarch_sdf_kernel(
     enable_ao_mode: u32,
     cam_yaw: f32,
     cam_pitch: f32,
-    light_intensity: f32,
-    ambient_strength: f32,
     enable_key: u32,
     enable_fill: u32,
     enable_rim: u32,
@@ -519,6 +537,32 @@ pub fn raymarch_sdf_kernel(
     let b_factor = blend_factor;
 
     if x < w_val && y < h_val {
+        // =========================================================================
+        // 🟢 TENSOR 4: DYNAMISCHE EXTRAKTION DER UMWELT-REGISTER
+        // =========================================================================
+        // Block 0: Licht-Vektor und Intensität
+        let key_light_pos = Vec3::new(
+            env_settings[usize::new(0)],
+            env_settings[usize::new(1)],
+            env_settings[usize::new(2)],
+        );
+        let l_intensity = env_settings[usize::new(3)];
+
+        // Block 1: Licht-Farben und globale Umgebung
+        let key_r = env_settings[usize::new(4)];
+        let key_g = env_settings[usize::new(5)];
+        let key_b = env_settings[usize::new(6)];
+        let a_strength = env_settings[usize::new(7)];
+
+        // Block 2: Hintergrund-Farbe und Nebel-Dichte
+        let bg_r = env_settings[usize::new(8)];
+        let bg_g = env_settings[usize::new(9)];
+        let bg_b = env_settings[usize::new(10)];
+        let fog_density = env_settings[usize::new(11)];
+
+        // Block 3: Schalter
+        let fog_enabled = env_settings[usize::new(12)];
+
         let w_f = f32::cast_from(w_val);
         let h_f = f32::cast_from(h_val);
 
@@ -566,7 +610,7 @@ pub fn raymarch_sdf_kernel(
             let current_rd = final_rd.clone();
             let p = current_ro.add(current_rd.scale(t));
 
-            let step_res = scene_sdf(p, t_val, b_factor, meta, slots, materials);
+            let step_res = scene_sdf(p, t_val, b_factor, meta, slots, materials, arch_params, fold_params);
 
             hit_d = step_res.d;
             hit_r = step_res.r;
@@ -589,9 +633,10 @@ pub fn raymarch_sdf_kernel(
             ray_step += u32::new(1);
         }
 
-        let bg_r = f32::new(0.35) - uv_y * f32::new(0.10);
-        let bg_g = f32::new(0.45) - uv_y * f32::new(0.12);
-        let bg_b = f32::new(0.60) - uv_y * f32::new(0.15);
+        // 🟢 TENSOR 4: Hintergrund-Farbe dynamisch aus dem Umwelt-Register
+        let bg_r = bg_r - uv_y * f32::new(0.10);
+        let bg_g = bg_g - uv_y * f32::new(0.12);
+        let bg_b = bg_b - uv_y * f32::new(0.15);
 
         let mut final_color_x = bg_r;
         let mut final_color_y = bg_g;
@@ -599,9 +644,9 @@ pub fn raymarch_sdf_kernel(
 
         if hit_dist < f32::new(40.0) {
             let p = ro.add(final_rd.scale(hit_dist));
-            let normal = scene_sdf_normal(p.clone(), t_val, b_factor, meta, slots, materials);
+            let normal = scene_sdf_normal(p.clone(), t_val, b_factor, meta, slots, materials, arch_params, fold_params);
 
-            let key_light_pos = Vec3::new(f32::new(4.0), f32::new(7.0), f32::new(-4.0));
+            // 🟢 TENSOR 4: Key-Licht-Position dynamisch aus dem Umwelt-Register
             let fill_light_pos = Vec3::new(f32::new(-5.0), f32::new(3.0), f32::new(-3.0));
             let rim_light_pos = Vec3::new(f32::new(0.0), f32::new(6.0), f32::new(5.0));
 
@@ -623,19 +668,20 @@ pub fn raymarch_sdf_kernel(
             if shadow_mode == u32::new(1) {
                 let offset_p = p.add(normal.scale(f32::new(0.02)));
                 let shadow_factor = calculate_soft_shadow(
-                    offset_p, key_dir, t_val, b_factor, meta, slots, materials,
+                    offset_p, key_dir, t_val, b_factor, meta, slots, materials, arch_params, fold_params,
                 );
                 diff_key *= shadow_factor;
             }
 
             let mut ao_factor = f32::new(1.0);
             if enable_ao_mode == u32::new(1) {
-                ao_factor = calculate_ao(p, normal, t_val, b_factor, meta, slots, materials);
+                ao_factor = calculate_ao(p, normal, t_val, b_factor, meta, slots, materials, arch_params, fold_params);
             }
 
-            let mut key_r = f32::new(1.00);
-            let mut key_g = f32::new(0.95);
-            let mut key_b = f32::new(0.85);
+            // 🟢 TENSOR 4: Key-Licht-Farbe dynamisch aus dem Umwelt-Register
+            let mut key_r = key_r;
+            let mut key_g = key_g;
+            let mut key_b = key_b;
             let mut fill_r = f32::new(0.25);
             let mut fill_g = f32::new(0.40);
             let mut fill_b = f32::new(0.60);
@@ -659,10 +705,7 @@ pub fn raymarch_sdf_kernel(
                 rim_b = f32::new(0.0);
             }
 
-            let l_intensity = light_intensity;
-            let amb_strength = ambient_strength;
-
-            // PBR Beleuchtungs-Kombination
+            // PBR Beleuchtungs-Kombination (🟢 TENSOR 4: l_intensity & a_strength aus Register)
             let mut lighting_r =
                 fill_r * diff_fill + rim_r * diff_rim + key_r * diff_key * l_intensity;
             let mut lighting_g =
@@ -672,12 +715,31 @@ pub fn raymarch_sdf_kernel(
 
             // Ambient Occlusion und Material-Albedo einrechnen
             final_color_x =
-                (hit_r * (lighting_r + amb_strength) + specular_highlight) * ao_factor + hit_emiss;
+                (hit_r * (lighting_r + a_strength) + specular_highlight) * ao_factor + hit_emiss;
             final_color_y =
-                (hit_g * (lighting_g + amb_strength) + specular_highlight) * ao_factor + hit_emiss;
+                (hit_g * (lighting_g + a_strength) + specular_highlight) * ao_factor + hit_emiss;
             final_color_z =
-                (hit_b * (lighting_b + amb_strength) + specular_highlight) * ao_factor + hit_emiss;
+                (hit_b * (lighting_b + a_strength) + specular_highlight) * ao_factor + hit_emiss;
         }
+
+        // =====================================================================
+        // 🟢 TENSOR 4: DYNAMISCHE NEBEL-KOMPOSITION (Puffer-gesteuert)
+        // =====================================================================
+        let mut fog = f32::new(1.0);
+        if fog_enabled > f32::new(0.5) {
+            // Nutzt fog_density dynamisch als Teiler für die Nebel-Kompression
+            fog = (f32::new(40.0) - hit_dist) / (f32::new(40.0) - (f32::new(15.0) * fog_density));
+            if fog > f32::new(1.0) {
+                fog = f32::new(1.0);
+            }
+            if fog < f32::new(0.0) {
+                fog = f32::new(0.0);
+            }
+        }
+
+        final_color_x = final_color_x * fog + bg_r * (f32::new(1.0) - fog);
+        final_color_y = final_color_y * fog + bg_g * (f32::new(1.0) - fog);
+        final_color_z = final_color_z * fog + bg_b * (f32::new(1.0) - fog);
 
         // 🟢 NEU: Direkte, lineare Zuweisung im f32 VRAM-Puffer
         // 1. Hole die Thread-Koordinaten direkt als usize
