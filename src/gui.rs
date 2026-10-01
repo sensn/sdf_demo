@@ -1,4 +1,4 @@
-//! 🟢 GUI-Modul: Sidebar mit Tabs (Env / Arch / Fold) für alle Tensor-Parameter.
+//! 🟢 GUI-Modul: Sidebar mit Tabs (Env / Arch / Fold / Ctrl) für alle Tensor-Parameter.
 //!
 //! Architektur:
 //! - `GuiState` hält alle Slider-Entities + die UI-Zustands-Entities
@@ -25,7 +25,7 @@ use wgpui_kit::{
     div,
     prelude::*,
     px, rgb,
-    AnyElement, App, Context, Entity, Styled, Window,
+    AnyElement, App, Context, Entity, FontWeight, Styled, Window,
 };
 
 use crate::ApplicationState;
@@ -34,8 +34,10 @@ use crate::ApplicationState;
 // Farben (Sidebar-Theme)
 // =========================================================================
 const PANEL_BG: u32 = 0x1a2333;
+const ITEM_BG: u32 = 0x161b28;
 const ACCENT: u32 = 0x00ffcc;
 const TEXT: u32 = 0xffffff;
+const MUTED: u32 = 0x8a92a6;
 
 // =========================================================================
 // UI-Zustand (als Entities, damit wgpui-Callbacks sie mutieren können)
@@ -47,6 +49,7 @@ pub enum GuiTab {
     Environment,
     Architecture,
     Fold,
+    Controls,
 }
 
 /// Aktiver Tab — als Entity, damit TabBar::on_click ihn schreiben kann.
@@ -292,11 +295,17 @@ fn slider_row(label: &str, slider: &Entity<SliderState>, value: f32) -> impl Int
                 .flex()
                 .flex_row()
                 .justify_between()
-                .child(div().text_color(rgb(TEXT)).text_xs().child(label.to_string()))
+                .child(
+                    div()
+                        .text_color(rgb(MUTED))
+                        .text_xs()
+                        .child(label.to_string()),
+                )
                 .child(
                     div()
                         .text_color(rgb(ACCENT))
                         .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
                         .child(format!("{:.2}", value)),
                 ),
         )
@@ -317,8 +326,16 @@ fn acc_item(
         content = content.child(row);
     }
     move |item: AccordionItem| {
-        item.title(div().text_color(rgb(TEXT)).child(title))
+        item.title(
+                div()
+                    .text_color(rgb(ACCENT))
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title),
+            )
             .open(open)
+            .bg(rgb(ITEM_BG))
+            .rounded_md()
             .child(content)
     }
 }
@@ -356,11 +373,17 @@ pub fn sidebar(
                 .selected(active == GuiTab::Architecture),
         )
         .child(Tab::new().label("Fold").selected(active == GuiTab::Fold))
+        .child(
+            Tab::new()
+                .label("Ctrl")
+                .selected(active == GuiTab::Controls),
+        )
         .on_click(move |ix: &usize, _win, cx| {
             let tab = match ix {
                 0 => GuiTab::Environment,
                 1 => GuiTab::Architecture,
-                _ => GuiTab::Fold,
+                2 => GuiTab::Fold,
+                _ => GuiTab::Controls,
             };
             tab_state.update(cx, |ts, cx| {
                 ts.active = tab;
@@ -373,6 +396,7 @@ pub fn sidebar(
         GuiTab::Environment => env_tab(gui, state, cx).into_any_element(),
         GuiTab::Architecture => arch_tab(gui, state, cx).into_any_element(),
         GuiTab::Fold => fold_tab(gui, state, cx).into_any_element(),
+        GuiTab::Controls => controls_tab(state).into_any_element(),
     };
 
     div()
@@ -525,7 +549,7 @@ fn fog_switch_row(state: &Arc<Mutex<ApplicationState>>, checked: bool) -> impl I
         .flex_row()
         .justify_between()
         .items_center()
-        .child(div().text_color(rgb(TEXT)).text_xs().child("Fog Enabled"))
+        .child(div().text_color(rgb(MUTED)).text_xs().child("Fog Enabled"))
         .child(
             Switch::new("fog_switch")
                 .checked(checked)
@@ -538,4 +562,165 @@ fn fog_switch_row(state: &Arc<Mutex<ApplicationState>>, checked: bool) -> impl I
                     }
                 }),
         )
+}
+
+// =========================================================================
+// Ctrl-Tab: Original-Steuerung (Kamera-Info, Schalter, Tasten-Hilfe)
+// =========================================================================
+
+/// Schalter-Zeile: Label + Switch, schreibt 0/1 in ein ApplicationState-Feld.
+fn toggle_row(
+    id: &'static str,
+    label: &str,
+    state: &Arc<Mutex<ApplicationState>>,
+    checked: bool,
+    write: fn(&mut ApplicationState, bool),
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_row()
+        .justify_between()
+        .items_center()
+        .child(div().text_color(rgb(TEXT)).text_sm().child(label.to_string()))
+        .child(
+            Switch::new(id)
+                .checked(checked)
+                .on_click({
+                    let state = state.clone();
+                    move |checked: &bool, _win, _cx| {
+                        if let Ok(mut s) = state.lock() {
+                            write(&mut s, *checked);
+                        }
+                    }
+                }),
+        )
+}
+
+/// Info-Zeile: Label links, Live-Wert rechts (z. B. Kameraposition).
+fn info_row(label: &str, value: String) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_row()
+        .justify_between()
+        .child(div().text_color(rgb(MUTED)).text_xs().child(label.to_string()))
+        .child(
+            div()
+                .text_color(rgb(ACCENT))
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(value),
+        )
+}
+
+/// Tasten-Hilfe: eine Zeile "• Taste : Beschreibung".
+fn key_row(key: &str, desc: &str) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_row()
+        .gap(px(6.0))
+        .child(div().text_color(rgb(ACCENT)).text_xs().child(format!("• {key}")))
+        .child(div().text_color(rgb(MUTED)).text_xs().child(desc.to_string()))
+}
+
+/// Ctrl-Tab: Kamera-Info, Render-Schalter (AO/Lichter/Schatten), Tasten-Hilfe.
+fn controls_tab(state: &Arc<Mutex<ApplicationState>>) -> impl IntoElement {
+    let s = state.lock().unwrap();
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        // --- Kamera ---
+        .child(section("Camera"))
+        .child(
+            div()
+                .bg(rgb(ITEM_BG))
+                .rounded_md()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(info_row("Cam X", format!("{:.2}", s.cam_x)))
+                .child(info_row("Cam Y", format!("{:.2}", s.cam_y)))
+                .child(info_row("Cam Z", format!("{:.2}", s.cam_z)))
+                .child(info_row("Yaw", format!("{:.2}", s.cam_yaw)))
+                .child(info_row("Pitch", format!("{:.2}", s.cam_pitch))),
+        )
+        // --- Render-Schalter ---
+        .child(section("Rendering"))
+        .child(
+            div()
+                .bg(rgb(ITEM_BG))
+                .rounded_md()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(toggle_row(
+                    "ao_switch",
+                    "Ambient Occlusion",
+                    state,
+                    s.enable_ao_mode == 1,
+                    |s, on| s.enable_ao_mode = if on { 1 } else { 0 },
+                ))
+                .child(toggle_row(
+                    "key_light_switch",
+                    "Key Light",
+                    state,
+                    s.enable_key == 1,
+                    |s, on| s.enable_key = if on { 1 } else { 0 },
+                ))
+                .child(toggle_row(
+                    "fill_light_switch",
+                    "Fill Light",
+                    state,
+                    s.enable_fill == 1,
+                    |s, on| s.enable_fill = if on { 1 } else { 0 },
+                ))
+                .child(toggle_row(
+                    "rim_light_switch",
+                    "Rim Light",
+                    state,
+                    s.enable_rim == 1,
+                    |s, on| s.enable_rim = if on { 1 } else { 0 },
+                ))
+                .child(toggle_row(
+                    "shadow_switch",
+                    "Hard Shadows",
+                    state,
+                    s.current_shadow_mode == 1,
+                    |s, on| s.current_shadow_mode = if on { 1 } else { 0 },
+                )),
+        )
+        // --- Tasten-Hilfe ---
+        .child(section("Key Bindings"))
+        .child(
+            div()
+                .bg(rgb(ITEM_BG))
+                .rounded_md()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap(px(3.0))
+                .child(key_row("WASD", "Fly through Scene"))
+                .child(key_row("Mouse", "Look around"))
+                .child(key_row("Key 1", "Toggle Key Light"))
+                .child(key_row("Key 2", "Toggle Fill Light"))
+                .child(key_row("Key 3", "Toggle Rim Light"))
+                .child(key_row("Key 4", "Toggle Hard Shadows"))
+                .child(key_row("Key 5", "Toggle AO"))
+                .child(key_row("Q / E", "Light Intensity -/+"))
+                .child(key_row("F / R", "Ambient Strength -/+"))
+                .child(key_row("O / L", "Fog Density -/+"))
+                .child(key_row("N", "Toggle Fog")),
+        )
+}
+
+/// Sektions-Überschrift (wie "Camera", "Rendering", "Key Bindings").
+fn section(title: &str) -> impl IntoElement {
+    div()
+        .text_color(rgb(ACCENT))
+        .text_sm()
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(title.to_string())
 }

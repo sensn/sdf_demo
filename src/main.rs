@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 // Offizielle wgpui-kit 0.6.1 Imports
 use wgpui_kit::{
-    component::Root,
+    component::{theme::ThemeMode, Root},
     div,
     prelude::*,
     px, rgb, wgpu_surface, App, Context, FocusHandle, Render, Styled,
@@ -220,6 +220,9 @@ impl Render for SurfaceExample {
 fn main() {
     wgpui_kit::application().run(|cx: &mut App| {
         wgpui_kit::init(cx);
+        // Dark-Theme: wgpui_kit::init defaultet auf Light (weiße Accordion-
+        // Hintergründe). Unsere Sidebar ist dunkel — Theme umschalten.
+        wgpui_kit::component::theme::Theme::change(ThemeMode::Dark, None, cx);
 
         cx.spawn(async move |cx| {
             let width = 1720;
