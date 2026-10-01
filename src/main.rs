@@ -1,3 +1,4 @@
+pub mod gui;
 pub mod input;
 mod kernel;
 
@@ -5,7 +6,7 @@ use bytemuck::{Pod, Zeroable};
 use cubecl::client::ComputeClient;
 use cubecl::frontend::TensorArg;
 use cubecl::Runtime;
-use cubecl_wgpu::{init_device, AutoCompiler, RuntimeOptions, WgpuRuntime, WgpuSetup};
+use cubecl_wgpu::{init_device, RuntimeOptions, WgpuRuntime, WgpuSetup};
 use cubecl_zspace::{Shape, Strides};
 
 use std::sync::{Arc, Mutex};
@@ -14,17 +15,14 @@ use std::time::{Duration, Instant};
 
 // Offizielle wgpui-kit 0.6.1 Imports
 use wgpui_kit::{
-    component::{
-        button::Button,
-        slider::{Slider, SliderEvent, SliderState},
-        switch::Switch,
-        Root,
-    },
+    component::Root,
     div,
     prelude::*,
-    px, rgb, wgpu_surface, App, Context, Entity, FocusHandle, Render, Styled,
+    px, rgb, wgpu_surface, App, Context, FocusHandle, Render, Styled,
     WgpuSurfaceHandle, Window, WindowOptions,
 };
+
+use gui::GuiState;
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -93,105 +91,8 @@ struct SurfaceExample {
     /// window root -> focused node). Without focus, `on_key_down`/`on_key_up`
     /// never fire, so we track + claim focus on the root div.
     focus_handle: FocusHandle,
-
-    // 🟢 GUI: Slider-Entities für alle Tensor-Parameter.
-    // Jeder Slider hält seinen eigenen SliderState (min/max/step/default),
-    // synchronisiert bidirektional mit ApplicationState:
-    //   Slider -> State: cx.subscribe(SliderEvent::Change) schreibt in den Mutex
-    //   State -> Slider: render() pusht den State-Wert via set_value (nur wenn
-    //                    der Slider gerade nicht gezogen wird, sonst Kampf um den Wert)
-    // TENSOR 4 (Umwelt):
-    light_intensity_slider: Entity<SliderState>,
-    ambient_strength_slider: Entity<SliderState>,
-    key_light_x_slider: Entity<SliderState>,
-    key_light_y_slider: Entity<SliderState>,
-    key_light_z_slider: Entity<SliderState>,
-    key_r_slider: Entity<SliderState>,
-    key_g_slider: Entity<SliderState>,
-    key_b_slider: Entity<SliderState>,
-    bg_r_slider: Entity<SliderState>,
-    bg_g_slider: Entity<SliderState>,
-    bg_b_slider: Entity<SliderState>,
-    fog_density_slider: Entity<SliderState>,
-    // TENSOR 5 (Architektur):
-    pillar_dist_slider: Entity<SliderState>,
-    pillar_thick_slider: Entity<SliderState>,
-    room_height_slider: Entity<SliderState>,
-    ceiling_thick_slider: Entity<SliderState>,
-    arch_radius_slider: Entity<SliderState>,
-    arch_height_slider: Entity<SliderState>,
-    decor_freq_slider: Entity<SliderState>,
-    decor_depth_slider: Entity<SliderState>,
-    decor_thick_slider: Entity<SliderState>,
-    // TENSOR 6 (Faltung):
-    cell_size_slider: Entity<SliderState>,
-    fold_speed_slider: Entity<SliderState>,
-}
-
-/// 🟢 GUI-Helper: Eine Slider-Zeile = Label + Live-Wert + Slider.
-fn slider_row(
-    label: &str,
-    slider: &Entity<SliderState>,
-    value: f32,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(2.0))
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .justify_between()
-                .child(div().text_color(rgb(0xffffff)).text_xs().child(label.to_string()))
-                .child(
-                    div()
-                        .text_color(rgb(0x00ffcc))
-                        .text_xs()
-                        .child(format!("{:.2}", value)),
-                ),
-        )
-        .child(Slider::new(slider).horizontal())
-}
-
-/// 🟢 GUI-Helper: Slider-Wert aus ApplicationState in den SliderState pushen.
-/// Während eines Nutzer-Drags hat der Slider seinen Wert bereits via
-/// SliderEvent::Change in den State geschrieben — das Zurückschreiben desselben
-/// Werts ist ein No-Op. Der Epsilon-Guard verhindert nur Float-Rundungs-
-/// Rückkopplung (State -> Slider -> State ...), wenn Q/E/F/R/O/L den Wert ändern.
-fn sync_slider_from_state(
-    slider: &Entity<SliderState>,
-    value: f32,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let current = slider.read(cx).value().start();
-    if (current - value).abs() > f32::EPSILON {
-        slider.update(cx, |state, cx| {
-            state.set_value(value, window, cx);
-        });
-    }
-}
-
-/// 🟢 GUI-Helper: Einmalige Slider-Subscription — schreibt Slider-Änderungen
-/// in ApplicationState (Slider -> State Richtung). Wird beim Bau der
-/// SurfaceExample aufgerufen, Subscription wird gedetached (lebt ewig).
-fn subscribe_slider(
-    cx: &mut App,
-    slider: &Entity<SliderState>,
-    state: &Arc<Mutex<ApplicationState>>,
-    write: fn(&mut ApplicationState, f32),
-) {
-    // Arc klonen, damit die 'static-Closure ihn besitzt (kein Borrow-Escape).
-    let state = state.clone();
-    cx.subscribe(slider, move |_, event: &SliderEvent, _cx| {
-        if let SliderEvent::Change(value) = event {
-            if let Ok(mut s) = state.lock() {
-                write(&mut s, value.start());
-            }
-        }
-    })
-    .detach();
+    /// 🟢 GUI: kompletter UI-Zustand (Slider-Entities, Tabs, Accordions)
+    gui: GuiState,
 }
 
 impl Render for SurfaceExample {
@@ -223,64 +124,6 @@ impl Render for SurfaceExample {
 
         let state_key_down = self.state.clone();
         let state_key_up = self.state.clone();
-        let state_ao_toggle = self.state.clone();
-        let state_rim_toggle = self.state.clone();
-        let state_shadow_toggle = self.state.clone();
-        let state_fog_toggle = self.state.clone();
-
-        let state_read = self.state.lock().unwrap();
-
-        let cam_x_val = state_read.cam_x;
-        let cam_y_val = state_read.cam_y;
-        let cam_z_val = state_read.cam_z;
-        let ao_on = state_read.enable_ao_mode == 1;
-        let rim_on = state_read.enable_rim == 1;
-        let shadow_on = state_read.current_shadow_mode == 1;
-        let fog_on = state_read.fog_enabled == 1;
-        let light_int_val = state_read.light_intensity;
-        let ambient_val = state_read.ambient_strength;
-        let fog_dens_val = state_read.fog_density;
-
-        // 🟢 GUI: State -> Slider synchronisieren (nur wenn Slider nicht gerade
-        // vom Nutzer gezogen wird — sonst würde der Drag überschrieben).
-        // Key-Handler (Q/E, F/R, O/L) und Slider bleiben so konsistent.
-        sync_slider_from_state(
-            &self.light_intensity_slider,
-            state_read.light_intensity,
-            window,
-            _cx,
-        );
-        sync_slider_from_state(
-            &self.ambient_strength_slider,
-            state_read.ambient_strength,
-            window,
-            _cx,
-        );
-        sync_slider_from_state(&self.key_light_x_slider, state_read.key_light_x, window, _cx);
-        sync_slider_from_state(&self.key_light_y_slider, state_read.key_light_y, window, _cx);
-        sync_slider_from_state(&self.key_light_z_slider, state_read.key_light_z, window, _cx);
-        sync_slider_from_state(&self.key_r_slider, state_read.key_r, window, _cx);
-        sync_slider_from_state(&self.key_g_slider, state_read.key_g, window, _cx);
-        sync_slider_from_state(&self.key_b_slider, state_read.key_b, window, _cx);
-        sync_slider_from_state(&self.bg_r_slider, state_read.bg_r, window, _cx);
-        sync_slider_from_state(&self.bg_g_slider, state_read.bg_g, window, _cx);
-        sync_slider_from_state(&self.bg_b_slider, state_read.bg_b, window, _cx);
-        sync_slider_from_state(&self.fog_density_slider, state_read.fog_density, window, _cx);
-        sync_slider_from_state(&self.pillar_dist_slider, state_read.pillar_dist, window, _cx);
-        sync_slider_from_state(&self.pillar_thick_slider, state_read.pillar_thick, window, _cx);
-        sync_slider_from_state(&self.room_height_slider, state_read.room_height, window, _cx);
-        sync_slider_from_state(&self.ceiling_thick_slider, state_read.ceiling_thick, window, _cx);
-        sync_slider_from_state(&self.arch_radius_slider, state_read.arch_radius, window, _cx);
-        sync_slider_from_state(&self.arch_height_slider, state_read.arch_height, window, _cx);
-        sync_slider_from_state(&self.decor_freq_slider, state_read.decor_freq, window, _cx);
-        sync_slider_from_state(&self.decor_depth_slider, state_read.decor_depth, window, _cx);
-        sync_slider_from_state(&self.decor_thick_slider, state_read.decor_thick, window, _cx);
-        sync_slider_from_state(&self.cell_size_slider, state_read.cell_size, window, _cx);
-        sync_slider_from_state(&self.fold_speed_slider, state_read.fold_speed, window, _cx);
-
-        // Hinweis: state_read (MutexGuard) bleibt bis zum Ende von render() alive,
-        // weil die Slider-Panels unten noch Werte daraus lesen. Die Event-Handler
-        // sperren den Mutex erst bei echten Events (nach render) → kein Deadlock.
 
         div()
             .id("root")
@@ -366,279 +209,11 @@ impl Render for SurfaceExample {
                     ),
             )
             
-            .child(
-                div()
-                    .w(px(320.0))
-                    .h_full()
-                    .bg(rgb(0x151a29))
-                    .p_4()
-                    .flex()
-                    .flex_col()
-                    .gap(px(16.0))
-                    .child(
-                        div()
-                            .text_color(rgb(0xffffff))
-                            .text_lg()
-                            .child("SDF Engine Controls"),
-                    )
-                    /*
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_color(rgb(0x8a92a6))
-                                    .text_sm()
-                                    .child(format!("Cam X: {:.2}", cam_x_val)),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x8a92a6))
-                                    .text_sm()
-                                    .child(format!("Cam Y: {:.2}", cam_y_val)),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x8a92a6))
-                                    .text_sm()
-                                    .child(format!("Cam Z: {:.2}", cam_z_val)),
-                            ),
-                    )
-                    .child(div().h(px(1.0)).bg(rgb(0x2a2f42)))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .justify_between()
-                            .items_center()
-                            .child(div().text_color(rgb(0xffffff)).child("Ambient Occlusion"))
-                            .child(
-                                Button::new("ao_btn")
-                                    .label(if ao_on { "ACTIVE" } else { "INACTIVE" })
-                                    .on_click(move |_, _, _| {
-                                        if let Ok(mut s) = state_ao_toggle.lock() {
-                                            s.enable_ao_mode =
-                                                if s.enable_ao_mode == 1 { 0 } else { 1 };
-                                        }
-                                    }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .justify_between()
-                            .items_center()
-                            .child(div().text_color(rgb(0xffffff)).child("Rim Lighting"))
-                            .child(
-                                Button::new("rim_btn")
-                                    .label(if rim_on { "ACTIVE" } else { "INACTIVE" })
-                                    .on_click(move |_, _, _| {
-                                        if let Ok(mut s) = state_rim_toggle.lock() {
-                                            s.enable_rim = if s.enable_rim == 1 { 0 } else { 1 };
-                                        }
-                                    }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .justify_between()
-                            .items_center()
-                            .child(div().text_color(rgb(0xffffff)).child("Shadow Mode"))
-                            .child(
-                                Button::new("shadow_btn")
-                                    .label(if shadow_on { "HARD" } else { "SOFT" })
-                                    .on_click(move |_, _, _| {
-                                        if let Ok(mut s) = state_shadow_toggle.lock() {
-                                            s.current_shadow_mode =
-                                                if s.current_shadow_mode == 1 { 0 } else { 1 };
-                                        }
-                                    }),
-                            ),
-                    )
-                    */
-                    /*
-                    .child(
-                        div()
-                            .bg(rgb(0x1a2333))
-                            .p_3()
-                            .rounded_md()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_color(rgb(0x00ffcc))
-                                    .text_sm()
-                                    .child("Keyboard Shortcuts:"),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x8a92a6))
-                                    .text_xs()
-                                    .child("• WASD : Fly through Scene"),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x8a92a6))
-                                    .text_xs()
-                                    .child("• Key 1 : Toggle Key Light"),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x8a92a6))
-                                    .text_xs()
-                                    .child("• Key 2 : Toggle Fill Light"),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x8a92a6))
-                                    .text_xs()
-                                    .child("• Key 3 : Toggle Rim Light"),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x8a92a6))
-                                    .text_xs()
-                                    .child("• Key 4 : Toggle Hard Shadows"),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x00ffcc))
-                                    .text_xs()
-                                    .child("• Q / E : Light Intensity -/+"),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x00ffcc))
-                                    .text_xs()
-                                    .child("• F / R : Ambient Strength -/+"),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x00ffcc))
-                                    .text_xs()
-                                    .child("• O / L : Fog Density -/+"),
-                            )
-                            .child(
-                                div()
-                                    .text_color(rgb(0x00ffcc))
-                                    .text_xs()
-                                    .child("• N : Toggle Fog"),
-                            ),
-                    )
-                    */
-                    // =========================================================
-                    // 🟢 TENSOR 4: UMWELT-SLIDER (Environmental Control)
-                    // =========================================================
-                   /*
-                     .child(
-                        div()
-                            .bg(rgb(0x1a2333))
-                            .p_3()
-                            .rounded_md()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_color(rgb(0x00ffcc))
-                                    .text_sm()
-                                    .child("Environment (Tensor 4):"),
-                            )
-                            .child(slider_row(
-                                "Light Intensity",
-                                &self.light_intensity_slider,
-                                light_int_val,
-                            ))
-                            .child(slider_row(
-                                "Ambient Strength",
-                                &self.ambient_strength_slider,
-                                ambient_val,
-                            ))
-                            .child(slider_row("Key Light X", &self.key_light_x_slider, state_read.key_light_x))
-                            .child(slider_row("Key Light Y", &self.key_light_y_slider, state_read.key_light_y))
-                            .child(slider_row("Key Light Z", &self.key_light_z_slider, state_read.key_light_z))
-                            .child(slider_row("Key Color R", &self.key_r_slider, state_read.key_r))
-                            .child(slider_row("Key Color G", &self.key_g_slider, state_read.key_g))
-                            .child(slider_row("Key Color B", &self.key_b_slider, state_read.key_b))
-                            .child(slider_row("Background R", &self.bg_r_slider, state_read.bg_r))
-                            .child(slider_row("Background G", &self.bg_g_slider, state_read.bg_g))
-                            .child(slider_row("Background B", &self.bg_b_slider, state_read.bg_b))
-                            .child(slider_row("Fog Density", &self.fog_density_slider, fog_dens_val))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_row()
-                                    .justify_between()
-                                    .items_center()
-                                    .child(
-                                        div().text_color(rgb(0xffffff)).child("Fog Enabled"),
-                                    )
-                                    .child(
-                                        Switch::new("fog_switch")
-                                            .checked(fog_on)
-                                            .on_click(move |checked: &bool, _, _| {
-                                                if let Ok(mut s) = state_fog_toggle.lock() {
-                                                    s.fog_enabled = if *checked { 1 } else { 0 };
-                                                }
-                                            }),
-                                    ),
-                            ),
-                    )
-                    */
-                    // =========================================================
-                    // 🟢 TENSOR 5: ARCHITEKTUR-SLIDER (Tempel-Geometrie)
-                    // =========================================================
-                    .child(
-                        div()
-                            .bg(rgb(0x1a2333))
-                            .p_3()
-                            .rounded_md()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_color(rgb(0x00ffcc))
-                                    .text_sm()
-                                    .child("Architecture (Tensor 5):"),
-                            )
-                            .child(slider_row("Pillar Distance", &self.pillar_dist_slider, state_read.pillar_dist))
-                            .child(slider_row("Pillar Thickness", &self.pillar_thick_slider, state_read.pillar_thick))
-                            .child(slider_row("Room Height", &self.room_height_slider, state_read.room_height))
-                            .child(slider_row("Ceiling Thickness", &self.ceiling_thick_slider, state_read.ceiling_thick))
-                            .child(slider_row("Arch Radius", &self.arch_radius_slider, state_read.arch_radius))
-                            .child(slider_row("Arch Height", &self.arch_height_slider, state_read.arch_height))
-                            .child(slider_row("Decor Frequency", &self.decor_freq_slider, state_read.decor_freq))
-                            .child(slider_row("Decor Depth", &self.decor_depth_slider, state_read.decor_depth))
-                            .child(slider_row("Decor Thickness", &self.decor_thick_slider, state_read.decor_thick)),
-                    )
-                    // =========================================================
-                    // 🟢 TENSOR 6: FALTUNGS-SLIDER (Unendliche Raumfaltung)
-                    // =========================================================
-                    .child(
-                        div()
-                            .bg(rgb(0x1a2333))
-                            .p_3()
-                            .rounded_md()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_color(rgb(0x00ffcc))
-                                    .text_sm()
-                                    .child("Infinite Fold (Tensor 6):"),
-                            )
-                            .child(slider_row("Cell Size", &self.cell_size_slider, state_read.cell_size))
-                            .child(slider_row("Fold Speed", &self.fold_speed_slider, state_read.fold_speed)),
-                    )
-            )
+            // =========================================================
+            // 🟢 GUI: Sidebar aus dem separaten gui-Modul (Tabs + Accordions
+            // + Scrollbar — passt auf jeden Screen)
+            // =========================================================
+            .child(gui::sidebar(&mut self.gui, &self.state, window, _cx))
     }
 }
 
@@ -1014,8 +589,7 @@ fn main() {
                                 Shape::from(&[4usize]),
                             )
                         };
-                        unsafe {
-                            kernel::raymarch_sdf_kernel::launch(
+                        kernel::raymarch_sdf_kernel::launch(
                                 &client,
                                 cube_count,
                                 cube_dim,
@@ -1041,7 +615,6 @@ fn main() {
                                 s.enable_fill,
                                 s.enable_rim,
                             );
-                        }
                         let _ = client.sync();
                         let managed_resource = client.get_resource(output_handle.clone()).unwrap();
                         let wgpu_resource = managed_resource.resource();
@@ -1106,198 +679,11 @@ fn main() {
                     }
                 });
                 let view = cx.new(|cx| {
-                    let state = shared_state.clone();
-
-                    // 🟢 GUI: Slider-Entities bauen — min/max/step aus den
-                    // sinnvollen Wertebereichen, default = Original-Konstante.
-                    // Jeder Slider bekommt eine Subscription, die Änderungen
-                    // in ApplicationState schreibt (bidirektionale Sync).
-                    let light_intensity_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(3.0)
-                            .step(0.05)
-                            .default_value(1.0)
-                    });
-                    let ambient_strength_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(1.0)
-                            .step(0.01)
-                            .default_value(0.1)
-                    });
-                    let key_light_x_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(-20.0)
-                            .max(20.0)
-                            .step(0.1)
-                            .default_value(4.0)
-                    });
-                    let key_light_y_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(20.0)
-                            .step(0.1)
-                            .default_value(7.0)
-                    });
-                    let key_light_z_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(-20.0)
-                            .max(20.0)
-                            .step(0.1)
-                            .default_value(-4.0)
-                    });
-                    let key_r_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(1.0)
-                            .step(0.01)
-                            .default_value(1.0)
-                    });
-                    let key_g_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(1.0)
-                            .step(0.01)
-                            .default_value(0.95)
-                    });
-                    let key_b_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(1.0)
-                            .step(0.01)
-                            .default_value(0.85)
-                    });
-                    let bg_r_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(1.0)
-                            .step(0.01)
-                            .default_value(0.35)
-                    });
-                    let bg_g_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(1.0)
-                            .step(0.01)
-                            .default_value(0.45)
-                    });
-                    let bg_b_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(1.0)
-                            .step(0.01)
-                            .default_value(0.60)
-                    });
-                    let fog_density_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(2.0)
-                            .step(0.01)
-                            .default_value(0.5)
-                    });
-                    let pillar_dist_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(2.0)
-                            .max(12.0)
-                            .step(0.1)
-                            .default_value(5.0)
-                    });
-                    let pillar_thick_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.1)
-                            .max(2.0)
-                            .step(0.05)
-                            .default_value(0.6)
-                    });
-                    let room_height_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(1.0)
-                            .max(8.0)
-                            .step(0.1)
-                            .default_value(3.0)
-                    });
-                    let ceiling_thick_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.01)
-                            .max(1.0)
-                            .step(0.01)
-                            .default_value(0.1)
-                    });
-                    let arch_radius_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(1.0)
-                            .max(6.0)
-                            .step(0.1)
-                            .default_value(3.2)
-                    });
-                    let arch_height_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(4.0)
-                            .step(0.1)
-                            .default_value(1.0)
-                    });
-                    let decor_freq_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(8.0)
-                            .step(0.1)
-                            .default_value(2.0)
-                    });
-                    let decor_depth_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(0.2)
-                            .step(0.005)
-                            .default_value(0.03)
-                    });
-                    let decor_thick_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(0.1)
-                            .step(0.002)
-                            .default_value(0.01)
-                    });
-                    let cell_size_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(2.0)
-                            .max(40.0)
-                            .step(0.5)
-                            .default_value(10.0)
-                    });
-                    let fold_speed_slider = cx.new(|_| {
-                        SliderState::new()
-                            .min(0.0)
-                            .max(5.0)
-                            .step(0.05)
-                            .default_value(1.0)
-                    });
-
-                    // 🟢 GUI: Subscriptions — Slider -> ApplicationState
-                    subscribe_slider(cx, &light_intensity_slider, &state, |s, v| s.light_intensity = v);
-                    subscribe_slider(cx, &ambient_strength_slider, &state, |s, v| s.ambient_strength = v);
-                    subscribe_slider(cx, &key_light_x_slider, &state, |s, v| s.key_light_x = v);
-                    subscribe_slider(cx, &key_light_y_slider, &state, |s, v| s.key_light_y = v);
-                    subscribe_slider(cx, &key_light_z_slider, &state, |s, v| s.key_light_z = v);
-                    subscribe_slider(cx, &key_r_slider, &state, |s, v| s.key_r = v);
-                    subscribe_slider(cx, &key_g_slider, &state, |s, v| s.key_g = v);
-                    subscribe_slider(cx, &key_b_slider, &state, |s, v| s.key_b = v);
-                    subscribe_slider(cx, &bg_r_slider, &state, |s, v| s.bg_r = v);
-                    subscribe_slider(cx, &bg_g_slider, &state, |s, v| s.bg_g = v);
-                    subscribe_slider(cx, &bg_b_slider, &state, |s, v| s.bg_b = v);
-                    subscribe_slider(cx, &fog_density_slider, &state, |s, v| s.fog_density = v);
-                    subscribe_slider(cx, &pillar_dist_slider, &state, |s, v| s.pillar_dist = v);
-                    subscribe_slider(cx, &pillar_thick_slider, &state, |s, v| s.pillar_thick = v);
-                    subscribe_slider(cx, &room_height_slider, &state, |s, v| s.room_height = v);
-                    subscribe_slider(cx, &ceiling_thick_slider, &state, |s, v| s.ceiling_thick = v);
-                    subscribe_slider(cx, &arch_radius_slider, &state, |s, v| s.arch_radius = v);
-                    subscribe_slider(cx, &arch_height_slider, &state, |s, v| s.arch_height = v);
-                    subscribe_slider(cx, &decor_freq_slider, &state, |s, v| s.decor_freq = v);
-                    subscribe_slider(cx, &decor_depth_slider, &state, |s, v| s.decor_depth = v);
-                    subscribe_slider(cx, &decor_thick_slider, &state, |s, v| s.decor_thick = v);
-                    subscribe_slider(cx, &cell_size_slider, &state, |s, v| s.cell_size = v);
-                    subscribe_slider(cx, &fold_speed_slider, &state, |s, v| s.fold_speed = v);
+                    // 🟢 GUI: kompletten UI-Zustand bauen (Slider-Entities mit
+                    // min/max/step/default aus den Original-Konstanten,
+                    // Subscriptions Slider -> ApplicationState, Tab-/Accordion-
+                    // Zustand). Alles Weitere lebt in src/gui.rs.
+                    let gui = GuiState::new(cx, &shared_state);
 
                     SurfaceExample {
                         surface,
@@ -1305,29 +691,7 @@ fn main() {
                         fps_rx,
                         display_fps: 0.0,
                         focus_handle: cx.focus_handle(),
-                        light_intensity_slider,
-                        ambient_strength_slider,
-                        key_light_x_slider,
-                        key_light_y_slider,
-                        key_light_z_slider,
-                        key_r_slider,
-                        key_g_slider,
-                        key_b_slider,
-                        bg_r_slider,
-                        bg_g_slider,
-                        bg_b_slider,
-                        fog_density_slider,
-                        pillar_dist_slider,
-                        pillar_thick_slider,
-                        room_height_slider,
-                        ceiling_thick_slider,
-                        arch_radius_slider,
-                        arch_height_slider,
-                        decor_freq_slider,
-                        decor_depth_slider,
-                        decor_thick_slider,
-                        cell_size_slider,
-                        fold_speed_slider,
+                        gui,
                     }
                 });
                 cx.new(|cx| Root::new(view, window, cx))
