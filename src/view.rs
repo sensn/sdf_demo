@@ -50,27 +50,27 @@ let update_slot_color = |s: &mut ApplicationState, idx: usize| {
         "1" if !held => { 
             s.current_selected_slot = 0; 
             s.slot_types[0] = if s.slot_types[0] == 3.0 { 0.0 } else { s.slot_types[0] + 1.0 }; 
-            update_slot_color(&mut s, 0); 
+            update_slot_color(s, 0); 
         }
         "2" if !held => { 
             s.current_selected_slot = 1; 
             s.slot_types[1] = if s.slot_types[1] == 3.0 { 0.0 } else { s.slot_types[1] + 1.0 }; 
-            update_slot_color(&mut s, 1); 
+            update_slot_color(s, 1); 
         }
         "3" if !held => { 
             s.current_selected_slot = 2; 
             s.slot_types[2] = if s.slot_types[2] == 3.0 { 0.0 } else { s.slot_types[2] + 1.0 }; 
-            update_slot_color(&mut s, 2); 
+            update_slot_color(s, 2); 
         }
         "4" if !held => { 
             s.current_selected_slot = 3; 
             s.slot_types[3] = if s.slot_types[3] == 3.0 { 0.0 } else { s.slot_types[3] + 1.0 }; 
-            update_slot_color(&mut s, 3); 
+            update_slot_color(s, 3); 
         }
         "5" if !held => { 
             s.current_selected_slot = 4; 
             s.slot_types[4] = if s.slot_types[4] == 3.0 { 0.0 } else { s.slot_types[4] + 1.0 }; 
-            update_slot_color(&mut s, 4); 
+            update_slot_color(s, 4); 
         }
 
         // 3️⃣ 🚀 TASTE "6": Vollkommen synchronisiertes Spawning zur Laufzeit
@@ -94,7 +94,7 @@ let update_slot_color = |s: &mut ApplicationState, idx: usize| {
                 println!("[Space-Lab] 🚀 Slot 6 vollumfänglich im PBR-Verbund generiert!");
             } else {
                 s.slot_types[5] = if s.slot_types[5] == 3.0 { 0.0 } else { s.slot_types[5] + 1.0 };
-                update_slot_color(&mut s, 5);
+                update_slot_color(s, 5);
             }
         }
         

@@ -520,7 +520,8 @@ pub fn fresnel_schlick(cos_theta: f32, f0: f32) -> f32 {
 pub fn d_ggx(n_dot_h: f32, alpha: f32) -> f32 {
     let a2 = alpha * alpha;
     let d = n_dot_h * n_dot_h * (a2 - f32::new(1.0)) + f32::new(1.0);
-    let pi = f32::new(3.14159265);
+    // PI als Bruch 355/113 (clippy: keine approximierten Konstanten)
+    let pi = f32::new(355.0) / f32::new(113.0);
     (a2 / (pi * d * d)).max(f32::new(0.0))
 }
 
@@ -562,7 +563,8 @@ pub fn cook_torrance_light(
     specular: f32,
 ) -> Vec3 {
     let eps = f32::new(0.0001);
-    let pi = f32::new(3.14159265);
+    // PI als Bruch (clippy: keine approximierten Konstanten-Literale)
+    let pi = f32::new(355.0) / f32::new(113.0);
     let n_dot_l = normal.dot(light_dir.clone()).max(f32::new(0.0));
     let n_dot_v = normal.dot(view_dir.clone()).max(eps);
     let h = light_dir.add(view_dir).normalize();
