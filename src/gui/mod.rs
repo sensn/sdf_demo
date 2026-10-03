@@ -1,4 +1,5 @@
-//! 🟢 GUI-Modul: Sidebar mit Tabs (Env / Arch / Fold / Ctrl) für alle Tensor-Parameter.
+//! 🟢 GUI-Modul: Sidebar mit Tabs (Env / Arch / Fold / Mat / Ctrl) für alle
+//! Tensor-Parameter.
 //!
 //! Architektur:
 //! - `GuiState` (diese Datei) hält alle Slider-Entities + die UI-Zustands-
@@ -15,7 +16,7 @@
 //! Aufteilung:
 //! - `widgets.rs`  — Zeilen-Helfer + Slider-Verdrahtung
 //! - `sidebar.rs`  — Layout, TabBar, Scroll-Container
-//! - `tabs/`       — ein File pro Tab (env, arch, fold, ctrl)
+//! - `tabs/`       — ein File pro Tab (env, arch, fold, mat, ctrl)
 
 mod sidebar;
 mod tabs;
@@ -53,6 +54,7 @@ pub enum GuiTab {
     Environment,
     Architecture,
     Fold,
+    Material,
     Controls,
 }
 
@@ -101,6 +103,11 @@ pub struct GuiState {
     // TENSOR 6 (Faltung):
     pub cell_size_slider: Entity<SliderState>,
     pub fold_speed_slider: Entity<SliderState>,
+    // 🟢 PBR-MATERIAL-TENSOR (pro Slot, editiert current_selected_slot):
+    pub mat_roughness_slider: Entity<SliderState>,
+    pub mat_metallic_slider: Entity<SliderState>,
+    pub mat_emissive_slider: Entity<SliderState>,
+    pub mat_specular_slider: Entity<SliderState>,
 
     /// UI-Zustand
     pub tab_state: Entity<TabState>,
@@ -162,6 +169,16 @@ impl GuiState {
         let fold_speed_slider =
             cx.new(|_| SliderState::new().min(0.0).max(5.0).step(0.05).default_value(1.0));
 
+        // --- PBR-Material-Slider (schreiben in slot_*[current_selected_slot])
+        let mat_roughness_slider =
+            cx.new(|_| SliderState::new().min(0.01).max(1.0).step(0.01).default_value(0.2));
+        let mat_metallic_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.0));
+        let mat_emissive_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(10.0).step(0.1).default_value(0.0));
+        let mat_specular_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.5));
+
         // --- Subscriptions (Slider -> ApplicationState)
         subscribe_slider(cx, &light_intensity_slider, state, |s, v| s.light_intensity = v);
         subscribe_slider(cx, &ambient_strength_slider, state, |s, v| s.ambient_strength = v);
@@ -186,6 +203,26 @@ impl GuiState {
         subscribe_slider(cx, &decor_thick_slider, state, |s, v| s.decor_thick = v);
         subscribe_slider(cx, &cell_size_slider, state, |s, v| s.cell_size = v);
         subscribe_slider(cx, &fold_speed_slider, state, |s, v| s.fold_speed = v);
+
+        // PBR: Slider schreibt in den Vektor am Index des GEWÄHLTEN Slots.
+        // (Index wird beim Drag gelesen — Wechsel des Slots während des
+        // Drags schreibt in den neuen Slot, was ok ist.)
+        subscribe_slider(cx, &mat_roughness_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_roughness.len() { s.slot_roughness[i] = v; }
+        });
+        subscribe_slider(cx, &mat_metallic_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_metallic.len() { s.slot_metallic[i] = v; }
+        });
+        subscribe_slider(cx, &mat_emissive_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_emissive.len() { s.slot_emissive[i] = v; }
+        });
+        subscribe_slider(cx, &mat_specular_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_specular.len() { s.slot_specular[i] = v; }
+        });
 
         // --- UI-Zustand: Tab 0 (Env) aktiv, erste Accordion-Gruppe offen
         let tab_state = cx.new(|_| TabState {
@@ -220,6 +257,10 @@ impl GuiState {
             decor_thick_slider,
             cell_size_slider,
             fold_speed_slider,
+            mat_roughness_slider,
+            mat_metallic_slider,
+            mat_emissive_slider,
+            mat_specular_slider,
             tab_state,
             accordion_state,
         }
@@ -250,5 +291,17 @@ impl GuiState {
         sync_one(&self.decor_thick_slider, state.decor_thick, window, cx);
         sync_one(&self.cell_size_slider, state.cell_size, window, cx);
         sync_one(&self.fold_speed_slider, state.fold_speed, window, cx);
+
+        // PBR: Slider zeigt die Werte des GEWÄHLTEN Slots. Bei Slot-Wechsel
+        // (Taste 1–6 oder Mat-Tab-Button) springen die Slider mit.
+        let sel = state
+            .current_selected_slot
+            .min(state.slot_roughness.len().saturating_sub(1));
+        if sel < state.slot_roughness.len() {
+            sync_one(&self.mat_roughness_slider, state.slot_roughness[sel], window, cx);
+            sync_one(&self.mat_metallic_slider, state.slot_metallic[sel], window, cx);
+            sync_one(&self.mat_emissive_slider, state.slot_emissive[sel], window, cx);
+            sync_one(&self.mat_specular_slider, state.slot_specular[sel], window, cx);
+        }
     }
 }

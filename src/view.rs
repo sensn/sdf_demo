@@ -28,7 +28,7 @@ pub struct SurfaceExample {
 /// Key-Down-Logik (WASD + Toggles). `held == true` bei OS-Key-Repeat →
 /// Toggles nur bei `!held` feuern lassen.
 fn handle_key_down(mut s: &mut ApplicationState, key: &str, held: bool) {
-let mut update_slot_color = |s: &mut ApplicationState, idx: usize| {
+let update_slot_color = |s: &mut ApplicationState, idx: usize| {
     match s.slot_types[idx] as u32 {
         1 => { s.slot_r[idx] = 1.0; s.slot_g[idx] = 0.0; s.slot_b[idx] = 0.0; } // Kristall -> Rot
         2 => { s.slot_r[idx] = 0.0; s.slot_g[idx] = 1.0; s.slot_b[idx] = 0.0; } // Gyroid -> Grün

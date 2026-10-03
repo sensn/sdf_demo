@@ -49,6 +49,7 @@ pub fn sidebar(
                 .selected(active == GuiTab::Architecture),
         )
         .child(Tab::new().label("Fold").selected(active == GuiTab::Fold))
+        .child(Tab::new().label("Mat").selected(active == GuiTab::Material))
         .child(
             Tab::new()
                 .label("Ctrl")
@@ -59,6 +60,7 @@ pub fn sidebar(
                 0 => GuiTab::Environment,
                 1 => GuiTab::Architecture,
                 2 => GuiTab::Fold,
+                3 => GuiTab::Material,
                 _ => GuiTab::Controls,
             };
             tab_state.update(cx, |ts, cx| {
@@ -72,6 +74,7 @@ pub fn sidebar(
         GuiTab::Environment => tabs::env_tab(gui, state, cx).into_any_element(),
         GuiTab::Architecture => tabs::arch_tab(gui, state, cx).into_any_element(),
         GuiTab::Fold => tabs::fold_tab(gui, state, cx).into_any_element(),
+        GuiTab::Material => tabs::mat_tab(gui, state, cx).into_any_element(),
         GuiTab::Controls => tabs::ctrl_tab(state).into_any_element(),
     };
 
