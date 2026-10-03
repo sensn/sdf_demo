@@ -279,6 +279,8 @@ impl GpuPipeline {
         write(&self.arch_handle, bytemuck::cast_slice(&s.arch_data()));
         write(&self.fold_handle, bytemuck::cast_slice(&s.fold_data()));
         write(&self.meta_handle, bytemuck::cast_slice(&s.meta_data()));
+        // 🚀 NEU: Schreibt die interleaved gepackten Slot-Daten in den VRAM-Buffer
+        write(&self.slots_handle, bytemuck::cast_slice(&s.slots_data()));
     }
 
     /// Ein kompletter Frame: Raymarch-Kernel-Launch + Blit auf den

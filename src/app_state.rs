@@ -9,6 +9,13 @@
 /// Kompilierte Kernel-Register (Tensor 4/5/6) — Reihenfolge ist ABI mit
 /// src/kernel.rs (env/arch/fold-Blöcke). NICHT umsortieren!
 pub struct ApplicationState {
+    // 🟢 DYNAMISCHES SLOT-SYSTEM STATE
+    pub current_selected_slot: usize,
+    pub active_slots_count: f32,
+    pub slot_types: Vec<f32>,
+    pub slot_sizes: Vec<f32>,
+    pub slot_offsets_x: Vec<f32>,
+    pub slot_offsets_z: Vec<f32>,
     // Kamera
     pub cam_x: f32,
     pub cam_y: f32,
@@ -64,6 +71,21 @@ pub struct ApplicationState {
 impl Default for ApplicationState {
     fn default() -> Self {
         Self {
+        // 
+            current_selected_slot: 0,
+            active_slots_count: 5.0,
+            slot_types: vec![1.0, 2.0, 3.0, 0.0, 0.0],
+            slot_sizes: vec![1.0, 1.0, 1.0, 1.0, 1.0],
+            slot_offsets_x: vec![0.0, -1.8, 1.8, 0.0, 0.0],
+            slot_offsets_z: vec![0.0, 0.0, 0.0, 1.8, -1.8],
+        //
+        
+/*         // 🟢 NEU: Echte Material-Daten im CPU-State (verhindert Shader-Glitches)
+            slot_roughness: vec![0.5, 0.5, 0.5, 0.5, 0.5],
+            slot_metallic: vec![0.0, 0.0, 0.0, 0.0, 0.0],
+            slot_emissive: vec![0.0, 0.0, 0.0, 0.0, 0.0],
+            slot_specular: vec![0.5, 0.5, 0.5, 0.5, 0.5],
+*/
             cam_x: 0.0,
             cam_y: 0.0,
             cam_z: -5.0,
@@ -80,7 +102,7 @@ impl Default for ApplicationState {
             enable_key: 1,
             enable_fill: 1,
             enable_rim: 1,
-            dynamic_blend_factor: 0.0,
+            dynamic_blend_factor: 0.5,
 
             // 🟢 TENSOR 4: Umwelt-Defaults (Blueprint: Environmental Control Tensor)
             key_light_x: 4.0,
@@ -116,6 +138,44 @@ impl Default for ApplicationState {
 }
 
 impl ApplicationState {
+    /// Meta-Tensor: Enthält die aktuelle Anzahl aktiver Slots für die GPU.
+    pub fn meta_data(&self) -> [f32; 1] {
+        [self.active_slots_count]
+    }
+
+    /// Slots-Tensor: Packt alle parallelen Slot-Vektoren in das vom 
+    /// Kernel erwartete Interleaved-Format [Typ, Größe, X, Z, ...].
+     /// Slots-Tensor: Packt alle parallelen Slot-Vektoren in das vom 
+    /// Kernel erwartete 8er-Stride Interleaved-Format [Typ, Größe, X, Y, Z, R, G, B, ...].
+    pub fn slots_data(&self) -> Vec<f32> {
+        // Kapazität auf 8 Werte pro Slot erhöhen
+        let mut raw_data = Vec::with_capacity(self.slot_types.len() * 8);
+        for i in 0..self.slot_types.len() {
+            raw_data.push(self.slot_types[i]);      // [0] Typ (1=Kristall, 2=Gyroid, 3=Torus)
+            raw_data.push(self.slot_sizes[i]);      // [1] Größe
+            raw_data.push(self.slot_offsets_x[i]);  // [2] Offset X
+            raw_data.push(0.0f32);                  // [3] Offset Y (Standard 0.0, da nicht in CPU-State)
+            raw_data.push(self.slot_offsets_z[i]);  // [4] Offset Z
+            raw_data.push(1.0f32);                  // [5] R (Farbe Weiß als Default)
+            raw_data.push(1.0f32);                  // [6] G
+            raw_data.push(1.0f32);                  // [7] B
+        }
+        raw_data
+    }
+    
+    /// Materials-Tensor: Definiert Standard-Materialien für die Slots (Stride 4).
+    pub fn materials_data(&self) -> Vec<f32> {
+        let mut raw_data = Vec::with_capacity(self.slot_types.len() * 4);
+        for _ in 0..self.slot_types.len() {
+            raw_data.push(0.5f32);  // roughness (0.5 = matt/normal)
+            raw_data.push(0.0f32);  // metallic
+            raw_data.push(0.0f32);  // emissive
+            raw_data.push(0.5f32);  // specular (0.5 = Standard-Glanz)
+        }
+        raw_data
+    }
+
+
     /// Tensor 4 (Umwelt): Licht-Pos, Intensität, Key-RGB, Ambient, BG-RGB,
     /// Nebel-Dichte, Nebel-Schalter, Padding. 16 f32 = 64 Bytes.
     pub fn env_data(&self) -> [f32; 16] {
@@ -162,10 +222,10 @@ impl ApplicationState {
         [self.cell_size, self.cell_size * 0.5, self.fold_speed, 0.0]
     }
 
-    /// Meta: active_slots = 0 → nur statische Architektur rendert
-    /// (deterministisch, verlässt sich nicht auf zeroed VRAM).
-    /// meta_handle = client.empty(4) = 4 Bytes = 1 f32!
-    pub fn meta_data(&self) -> [f32; 1] {
-        [0.0]
-    }
+    // Meta: active_slots = 0 → nur statische Architektur rendert
+    // (deterministisch, verlässt sich nicht auf zeroed VRAM).
+    // meta_handle = client.empty(4) = 4 Bytes = 1 f32!
+   // pub fn meta_data(&self) -> [f32; 1] {
+     //   [0.0]
+  //  }
 }
