@@ -58,6 +58,37 @@ pub fn run_render_loop(
         // State-Snapshot: Input anwenden, dann GPU-Register schreiben.
         let mut s = state.lock().unwrap();
         input_manager.update_camera_movement(&mut s, dt);
+        
+       /* //TEST
+        // =========================================================================
+// 🔬 VISUELLER PBR-BELASTUNGSTEST (Erzwingt extremes Material-Morphing)
+// =========================================================================
+// Wir modifizieren den State direkt vor dem Schreiben in den VRAM,
+// um zu sehen, ob die GPU-Akkumulatoren reaktiv antworten.
+let time = start_time.elapsed().as_secs_f32();
+
+// 1. Lass den Kristall (Slot 0) rhythmisch wie ein Plasma-Reaktor glühen (0.0 bis 8.0)
+s.slot_emissive[0] = (time * 3.0).sin().abs() * 8.0;
+
+// 2. Morphing der Oberflächenstruktur (Wechselt zwischen Chrom und Sandstein)
+// Sinus schwingt flüssig zwischen 0.0 und 1.0
+let morph_wave = (time * 2.0).sin().abs(); 
+
+if morph_wave > 0.5 {
+    // 💎 SPIEGELNDES CHROM (Erzwingt stechende Blinn-Phong/PBR-Reflexe)
+    s.slot_roughness[0] = 0.02; // Spiegelglatt
+    s.slot_metallic[0]  = 1.0;  // Vollmetall
+    s.slot_specular[0]  = 1.0;  // Maximale Reflektivität
+} else {
+    // 🪵 DIFFUSER SANDSTEIN (Erzwingt flache, matte Lichtstreuung)
+    s.slot_roughness[0] = 0.90; // Extrem rau
+    s.slot_metallic[0]  = 0.0;  // Nicht-Metall
+    s.slot_specular[0]  = 0.1;  // Stumpf
+}
+// =========================================================================
+
+        //TEST END
+        */
         pipeline.write_state_buffers(&s);
         pipeline.render_frame(&view, dw, dh, &s, time);
         drop(s);

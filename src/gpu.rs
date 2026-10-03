@@ -49,7 +49,7 @@ const CUBE_DIM_Y: u32 = 4;
 /// meta = 1 f32, slots = 800 f32, materials = 100 f32,
 /// env = 16 f32 (Tensor 4), arch = 12 f32 (Tensor 5), fold = 4 f32 (Tensor 6).
 const SLOTS_BYTES: usize = 800 * 4;
-const MATERIALS_BYTES: usize = 100 * 4;
+const MATERIALS_BYTES: usize = 100 * 4 * 4; //(was *4)
 const ENV_BYTES: usize = 16 * 4;
 const ARCH_BYTES: usize = 12 * 4;
 const FOLD_BYTES: usize = 4 * 4;
@@ -281,6 +281,8 @@ impl GpuPipeline {
         write(&self.meta_handle, bytemuck::cast_slice(&s.meta_data()));
         // 🚀 NEU: Schreibt die interleaved gepackten Slot-Daten in den VRAM-Buffer
         write(&self.slots_handle, bytemuck::cast_slice(&s.slots_data()));
+         // 🚀 BEHOBEN: Schreibt die physischen PBR-Materialdaten in den VRAM-Buffer (Stride 4)
+        write(&self.materials_handle, bytemuck::cast_slice(&s.materials_data()));
     }
 
     /// Ein kompletter Frame: Raymarch-Kernel-Launch + Blit auf den
@@ -328,7 +330,7 @@ impl GpuPipeline {
             TensorArg::from_raw_parts(
                 self.materials_handle.clone(),
                 Strides::from(&[1usize]),
-                Shape::from(&[100usize]),
+                Shape::from(&[400usize]),  //was 100
             )
         };
         let env_arg = unsafe {
