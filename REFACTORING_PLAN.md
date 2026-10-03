@@ -242,38 +242,57 @@ Reihenfolge auf).
 
 ---
 
-## 5. Phase 4 — gui.rs-Split (726 → ~4 Dateien)
+## 5. Phase 4 — gui.rs-Split (UMGESETZT ✅)
 
-`gui.rs` enthält `GuiState` (Slider-Entities, Tab-/Accordion-State),
-Sidebar-Layout und drei Tab-Renderer. Zielstruktur:
+`gui.rs` (726 Zeilen) enthielt `GuiState` (Slider-Entities, Tab-/
+Accordion-State), Sidebar-Layout und **vier** Tab-Renderer. Ergebnis:
 
 ```
 src/gui/
-├── mod.rs        (~80)   GuiState, new(), pub use
-├── sidebar.rs    (~120)  sidebar() — Layout, Scrollbar, Theme
-├── tabs/
-│   ├── env.rs    (~180)  env_tab() + Slider-Rows
-│   ├── arch.rs   (~180)  arch_tab() + Slider-Rows
-│   └── fold.rs   (~120)  fold_tab() + Slider-Rows
-└── widgets.rs    (~100)  slider_row(), acc_item() — Wiederverwendbare Helfer
+├── mod.rs        (254)  GuiState, new(), sync_sliders, Farben, UI-Entities
+├── sidebar.rs     (96)  sidebar() — Layout, TabBar, Scroll-Container, Dispatch
+├── widgets.rs    (190)  slider_row, acc_item, section, toggle_row,
+│                        info_row, key_row, subscribe_slider, sync_one
+└── tabs/
+    ├── mod.rs      (16)  Re-Exports
+    ├── env.rs      (96)  env_tab() + fog_switch_row (Tensor 4)
+    ├── arch.rs     (62)  arch_tab() (Tensor 5)
+    ├── fold.rs     (47)  fold_tab() (Tensor 6)
+    └── ctrl.rs    (110)  ctrl_tab() — Kamera-Info, Schalter, Tasten-Hilfe
 ```
 
-### 5.1 Vorgehen
+Hinweis: der Plan sah 3 Tabs vor, der Code hat 4 (Env/Arch/Fold/**Ctrl**)
+— `tabs/ctrl.rs` wurde ergänzt. `view.rs` ruft weiterhin
+`gui::sidebar(...)` mit unveränderter Signatur.
 
-1. `widgets.rs` extrahieren (`slider_row`, `acc_item`, `sync_one`,
-   `subscribe_slider` — reine Funktionen ohne GuiState-Abhängigkeit)
-2. `GuiState` + `new()` in `mod.rs` behalten (Entity-Erstellung braucht
-   `&mut App` — bleibt im Konstruktor)
-3. Tab-Renderer als freie Funktionen in eigene Dateien; jede bekommt
-   `(&mut GuiState, &Arc<Mutex<ApplicationState>>, &mut Window, &mut Context<SurfaceExample>)`
-4. `view.rs` ruft `gui::sidebar(...)` — Signatur unverändert lassen
+### 5.1 Vorgehen (wie umgesetzt)
 
-### 5.2 Risiken
+1. `widgets.rs` extrahiert (`slider_row`, `acc_item`, `section`,
+   `toggle_row`, `info_row`, `key_row`, `subscribe_slider`, `sync_one` —
+   reine Funktionen ohne GuiState-Abhängigkeit)
+2. `GuiState` + `new()` + `sync_sliders()` in `mod.rs` behalten
+   (Entity-Erstellung braucht den `AppContext`-Trait — Import ergänzt)
+3. Tab-Renderer als freie Funktionen in eigene Dateien; Signaturen
+   unverändert übernommen (`env_tab(&GuiState, &Arc<Mutex<...>>, &App)`
+   usw., `ctrl_tab(state)` ohne GuiState)
+4. `view.rs` ruft `gui::sidebar(...)` — Signatur unverändert
 
-| Risiko | Gegenmaßnahme |
-|---|---|
-| Slider-Subscriptions halten Entity-Handles | `GuiState`-Felder nicht umbenennen; nur Moves |
-| `Context<SurfaceExample>`-Typ in Submodulen | `use crate::view::SurfaceExample;` in jeder Tab-Datei |
+Sichtbarkeits-Setup, das sich bewährt hat: Widgets als `pub(super)` in
+`gui::widgets`, Tabs als `pub(in crate::gui)` mit `pub(super) use` in
+`tabs/mod.rs` — so bleibt alles Gui-intern.
+
+### 5.2 Risiken (alle eingetreten & behoben)
+
+| Risiko | Gegenmaßnahme | Ergebnis |
+|---|---|---|
+| Slider-Subscriptions halten Entity-Handles | `GuiState`-Felder nicht umbenennen; nur Moves | ✅ 1:1 übernommen |
+| `Context<SurfaceExample>`-Typ in Submodulen | `crate::SurfaceExample` via `crate::`-Pfad | ✅ nicht nötig — Tabs brauchen nur `&App` |
+| Kit-APIs abweichend (`AccordionItem::new(0 args)`, `TabBar::new(id)`, `acc_item` ist Closure) | Original aus `git show HEAD:src/gui.rs` rekonstruiert statt geraten | ✅ behoben |
+| `cx.new()` in Submodulen | `AppContext`-Trait-Import in `gui/mod.rs` | ✅ behoben |
+
+**Verifikation:** `cargo check` ✅ 0 Fehler/Warnungen · `cargo clippy` ✅ 0 ·
+`cargo build --release` ✅ (43 s). Manueller Smoke-Test (Tabs klicken,
+Slider ziehen, Schalter togglen) steht beim User aus.
 
 ---
 
@@ -302,7 +321,7 @@ src/gui/
 | 3 | **Phase 2b:** csg.rs-Entscheidung, GpuInitError, Konstanten | 2 |
 | 4 | **Phase 3:** kernel.rs-Split | 2 |
 | 5 | **Phase 5:** Fehlerbehandlung (optional) | 2 |
-| 6 | **Phase 4:** gui.rs-Split | 2 |
+| 6 | **Phase 4:** gui.rs-Split | ✅ erledigt |
 | 7 | Finale Verifikation: clippy, release-build, Smoke-Test | 3–6 |
 
 ---
