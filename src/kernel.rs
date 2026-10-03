@@ -504,6 +504,108 @@ pub fn calculate_ao(
     (f32::new(1.0) - (occ * f32::new(0.5))).max(f32::new(0.3))
 }
 
+// =========================================================================
+// 🟢 PBR: COOK-TORRANCE-HILFSFUNKTIONEN (siehe PBR_Optimisation_plan.md)
+// =========================================================================
+
+/// Schlick-Fresnel: Reflexionsgrad bei Einfallswinkel cos_theta.
+#[cube]
+pub fn fresnel_schlick(cos_theta: f32, f0: f32) -> f32 {
+    let f = (f32::new(1.0) - cos_theta).powf(f32::new(5.0));
+    f0 + (f32::new(1.0) - f0) * f
+}
+
+/// GGX-Normalverteilung: wie viel Energie geht in den Halbwinkel.
+#[cube]
+pub fn d_ggx(n_dot_h: f32, alpha: f32) -> f32 {
+    let a2 = alpha * alpha;
+    let d = n_dot_h * n_dot_h * (a2 - f32::new(1.0)) + f32::new(1.0);
+    let pi = f32::new(3.14159265);
+    (a2 / (pi * d * d)).max(f32::new(0.0))
+}
+
+/// Smith-Schlick-Geometrie: Maskierung/Schattierung der Mikrofacetten.
+#[cube]
+pub fn g_smith(n_dot_v: f32, n_dot_l: f32, alpha: f32) -> f32 {
+    let k = (alpha + f32::new(1.0)) * (alpha + f32::new(1.0)) / f32::new(8.0);
+    let gv = n_dot_v / (n_dot_v * (f32::new(1.0) - k) + k);
+    let gl = n_dot_l / (n_dot_l * (f32::new(1.0) - k) + k);
+    gv * gl
+}
+
+/// 🟢 ACES-Narkowicz-Tone-Mapping: HDR-Werte > 1.0 werden natürlich
+/// komprimiert statt hart geclampt (behebt das Emissive-Weiß-Clipping).
+#[cube]
+pub fn aces_tonemap(x: f32) -> f32 {
+    let a = f32::new(2.51);
+    let b = f32::new(0.03);
+    let c = f32::new(2.43);
+    let d = f32::new(0.59);
+    let e = f32::new(0.14);
+    (x * (a * x + b)) / (x * (c * x + d) + e)
+}
+
+/// 🟢 Ein komplettes Cook-Torrance-Licht für einen Punkt.
+/// Gibt den Beitrag (diffuse + specular) eines Lichts zurück.
+/// n_dot_l <= 0 (Licht hinter der Fläche) ergibt automatisch 0, da alle
+/// Terme mit n_dot_l bzw. max(0,·) skaliert sind — kein early return nötig.
+#[cube]
+pub fn cook_torrance_light(
+    albedo: Vec3,
+    normal: Vec3,
+    light_dir: Vec3, // zum Licht gerichtet, normalisiert
+    view_dir: Vec3,  // zur Kamera gerichtet, normalisiert
+    light_color: Vec3,
+    intensity: f32,
+    roughness: f32,
+    metallic: f32,
+    specular: f32,
+) -> Vec3 {
+    let eps = f32::new(0.0001);
+    let pi = f32::new(3.14159265);
+    let n_dot_l = normal.dot(light_dir.clone()).max(f32::new(0.0));
+    let n_dot_v = normal.dot(view_dir.clone()).max(eps);
+    let h = light_dir.add(view_dir).normalize();
+    let n_dot_h = normal.dot(h.clone()).max(f32::new(0.0));
+    let l_dot_h = light_dir.dot(h).max(f32::new(0.0));
+
+    // F0: Dielektrikum ~0.04 (durch specular-Slider skalierbar), Metall = Albedo
+    let f0_scalar = f32::new(0.04) * (f32::new(1.0) + specular * f32::new(3.0));
+    let f0 = Vec3::new(
+        f0_scalar + (albedo.x - f0_scalar) * metallic,
+        f0_scalar + (albedo.y - f0_scalar) * metallic,
+        f0_scalar + (albedo.z - f0_scalar) * metallic,
+    );
+
+    let alpha = roughness * roughness;
+    let d = d_ggx(n_dot_h, alpha);
+    let g = g_smith(n_dot_v, n_dot_l, alpha);
+    let f = fresnel_schlick(l_dot_h, f0.x); // Skalar-Fresnel (visuell ausreichend)
+
+    // Specular-BRDF: D*G*F / (4 * NdotL * NdotV)
+    let denom = (n_dot_v * n_dot_l * f32::new(4.0)).max(eps);
+    let spec_brdf = d * g * f / denom;
+
+    // Diffuse-Rest: (1-F) * (1-metallic) — Metalle haben keine diffuse Farbe
+    let kd = (f32::new(1.0) - f) * (f32::new(1.0) - metallic);
+
+    // Lambert / PI
+    let diff_r = kd * albedo.x / pi * n_dot_l;
+    let diff_g = kd * albedo.y / pi * n_dot_l;
+    let diff_b = kd * albedo.z / pi * n_dot_l;
+
+    // Specular ist farbig (F0-farbig für Metalle, weiß für Dielektrika)
+    let spec_r = spec_brdf * f0.x;
+    let spec_g = spec_brdf * f0.y;
+    let spec_b = spec_brdf * f0.z;
+
+    Vec3::new(
+        (diff_r + spec_r) * light_color.x * intensity,
+        (diff_g + spec_g) * light_color.y * intensity,
+        (diff_b + spec_b) * light_color.z * intensity,
+    )
+}
+
 #[cube(launch)]
 pub fn raymarch_sdf_kernel(
     output: &mut Tensor<f32>, // 🟢 OPTIMIERT: Jetzt f32 statt u32!
@@ -654,74 +756,88 @@ pub fn raymarch_sdf_kernel(
             let fill_dir = fill_light_pos.sub(p.clone()).normalize();
             let rim_dir = rim_light_pos.sub(p.clone()).normalize();
 
-            let mut diff_key = normal.dot(key_dir.clone()).max(f32::new(0.0));
-            let diff_fill = normal.dot(fill_dir).max(f32::new(0.0));
-            let diff_rim = normal.dot(rim_dir).max(f32::new(0.0));
-
             let view_dir = final_rd.scale(f32::new(-1.0)).normalize();
-            let half_vec = key_dir.clone().add(view_dir.clone()).normalize();
-            let spec_angle = normal.dot(half_vec).max(f32::new(0.0));
 
-            let spec_power = f32::new(1.0) / hit_rough.max(f32::new(0.01));
-            let specular_highlight = spec_angle.powf(spec_power * f32::new(15.0)) * hit_spec;
-
+            // 🟢 Schatten nur aufs Key-Licht (wie bisher)
+            let mut key_visibility = f32::new(1.0);
             if shadow_mode == u32::new(1) {
                 let offset_p = p.add(normal.scale(f32::new(0.02)));
                 let shadow_factor = calculate_soft_shadow(
-                    offset_p, key_dir, t_val, b_factor, meta, slots, materials, arch_params, fold_params,
+                    offset_p, key_dir.clone(), t_val, b_factor, meta, slots, materials, arch_params, fold_params,
                 );
-                diff_key *= shadow_factor;
+                key_visibility = shadow_factor;
             }
 
             let mut ao_factor = f32::new(1.0);
             if enable_ao_mode == u32::new(1) {
-                ao_factor = calculate_ao(p, normal, t_val, b_factor, meta, slots, materials, arch_params, fold_params);
+                ao_factor = calculate_ao(p, normal.clone(), t_val, b_factor, meta, slots, materials, arch_params, fold_params);
             }
 
-            // 🟢 TENSOR 4: Key-Licht-Farbe dynamisch aus dem Umwelt-Register
-            let mut key_r = key_r;
-            let mut key_g = key_g;
-            let mut key_b = key_b;
-            let mut fill_r = f32::new(0.25);
-            let mut fill_g = f32::new(0.40);
-            let mut fill_b = f32::new(0.60);
-            let mut rim_r = f32::new(0.50);
-            let mut rim_g = f32::new(0.70);
-            let mut rim_b = f32::new(1.00);
+            // 🟢 TENSOR 4: Licht-Farben (Key dynamisch, Fill/Rim fix)
+            let key_color = Vec3::new(key_r, key_g, key_b);
+            let fill_color = Vec3::new(f32::new(0.25), f32::new(0.40), f32::new(0.60));
+            let rim_color = Vec3::new(f32::new(0.50), f32::new(0.70), f32::new(1.00));
 
-            if enable_key == u32::new(0) {
-                key_r = f32::new(0.0);
-                key_g = f32::new(0.0);
-                key_b = f32::new(0.0);
+            let key_on = enable_key != u32::new(0);
+            let fill_on = enable_fill != u32::new(0);
+            let rim_on = enable_rim != u32::new(0);
+
+            let albedo = Vec3::new(hit_r, hit_g, hit_b);
+
+            // =========================================================================
+            // 🟢 COOK-TORRANCE PBR (siehe PBR_Optimisation_plan.md):
+            // - F0 = mix(0.04*(1+3*specular), albedo, metallic)
+            // - GGX-Verteilung, Smith-Geometrie, Schlick-Fresnel
+            // - kd = (1-F)*(1-metallic): Metalle haben keine diffuse Farbe
+            // =========================================================================
+            let mut light_r = f32::new(0.0);
+            let mut light_g = f32::new(0.0);
+            let mut light_b = f32::new(0.0);
+
+            if key_on {
+                let contrib = cook_torrance_light(
+                    albedo.clone(), normal.clone(), key_dir.clone(), view_dir.clone(),
+                    key_color, l_intensity, hit_rough, hit_metal, hit_spec,
+                );
+                light_r += contrib.x * key_visibility;
+                light_g += contrib.y * key_visibility;
+                light_b += contrib.z * key_visibility;
             }
-            if enable_fill == u32::new(0) {
-                fill_r = f32::new(0.0);
-                fill_g = f32::new(0.0);
-                fill_b = f32::new(0.0);
+            if fill_on {
+                let contrib = cook_torrance_light(
+                    albedo.clone(), normal.clone(), fill_dir.clone(), view_dir.clone(),
+                    fill_color, f32::new(1.0), hit_rough, hit_metal, hit_spec,
+                );
+                light_r += contrib.x;
+                light_g += contrib.y;
+                light_b += contrib.z;
             }
-            if enable_rim == u32::new(0) {
-                rim_r = f32::new(0.0);
-                rim_g = f32::new(0.0);
-                rim_b = f32::new(0.0);
+            if rim_on {
+                let contrib = cook_torrance_light(
+                    albedo.clone(), normal.clone(), rim_dir.clone(), view_dir.clone(),
+                    rim_color, f32::new(1.0), hit_rough, hit_metal, hit_spec,
+                );
+                light_r += contrib.x;
+                light_g += contrib.y;
+                light_b += contrib.z;
             }
 
-            // PBR Beleuchtungs-Kombination (🟢 TENSOR 4: l_intensity & a_strength aus Register)
-            let mut lighting_r =
-                fill_r * diff_fill + rim_r * diff_rim + key_r * diff_key * l_intensity;
-            let mut lighting_g =
-                fill_g * diff_fill + rim_g * diff_rim + key_g * diff_key * l_intensity;
-            let mut lighting_b =
-                fill_b * diff_fill + rim_b * diff_rim + key_b * diff_key * l_intensity;
+            // 🟢 Ambient: konstant — Metalle bekommen ihr Ambient über die
+            // Spiegel-Farbe F0 im Cook-Torrance-Specular, nicht über Grau
+            let ambient_r = a_strength * hit_r;
+            let ambient_g = a_strength * hit_g;
+            let ambient_b = a_strength * hit_b;
 
-            // Ambient Occlusion und Material-Albedo einrechnen
-            final_color_x =
-                (hit_r * (lighting_r + a_strength) + specular_highlight) * ao_factor + hit_emiss;
-            final_color_y =
-                (hit_g * (lighting_g + a_strength) + specular_highlight) * ao_factor + hit_emiss;
-            final_color_z =
-                (hit_b * (lighting_b + a_strength) + specular_highlight) * ao_factor + hit_emiss;
+            // 🟢 Emissive: farbig statt weiß (Slot-Farbe × Emissive-Skalar)
+            let emissive_r = hit_emiss * hit_r;
+            let emissive_g = hit_emiss * hit_g;
+            let emissive_b = hit_emiss * hit_b;
+
+            // Finaler Farb-Kanal-Zusammenbau inklusive AO & Emission
+            final_color_x = (light_r + ambient_r) * ao_factor + emissive_r;
+            final_color_y = (light_g + ambient_g) * ao_factor + emissive_g;
+            final_color_z = (light_b + ambient_b) * ao_factor + emissive_b;
         }
-
         // =====================================================================
         // 🟢 TENSOR 4: DYNAMISCHE NEBEL-KOMPOSITION (Puffer-gesteuert)
         // =====================================================================
@@ -740,6 +856,14 @@ pub fn raymarch_sdf_kernel(
         final_color_x = final_color_x * fog + bg_r * (f32::new(1.0) - fog);
         final_color_y = final_color_y * fog + bg_g * (f32::new(1.0) - fog);
         final_color_z = final_color_z * fog + bg_b * (f32::new(1.0) - fog);
+
+        // 🟢 ACES-TONE-MAPPING: HDR-Werte (>1.0 durch Emissive, hohe
+        // Intensitäten, Glanzlichter) werden natürlich komprimiert statt
+        // vom 8-Bit-Framebuffer hart geclampt. Behebt das
+        // „Emissive > 1.0 = totes Weiß"-Problem.
+        final_color_x = aces_tonemap(final_color_x);
+        final_color_y = aces_tonemap(final_color_y);
+        final_color_z = aces_tonemap(final_color_z);
 
         // 🟢 NEU: Direkte, lineare Zuweisung im f32 VRAM-Puffer
         // 1. Hole die Thread-Koordinaten direkt als usize
