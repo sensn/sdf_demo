@@ -1,0 +1,171 @@
+//! Geteilter Anwendungs-Zustand (CPU-seitig) + Packing in die GPU-Register.
+//!
+//! Die Struktur ist bewusst flach und `pub`: GUI (gui.rs), Input (input.rs)
+//! und Render-Loop (render_loop.rs) greifen über `Arc<Mutex<ApplicationState>>`
+//! auf dieselben Felder zu. Die `*_data()`-Methoden packen den State 1:1 in
+//! die Tensor-4/5/6-Register-Arrays, die jede Frame per `queue.write_buffer`
+//! in die cubecl-Buffer geschrieben werden.
+
+/// Kompilierte Kernel-Register (Tensor 4/5/6) — Reihenfolge ist ABI mit
+/// src/kernel.rs (env/arch/fold-Blöcke). NICHT umsortieren!
+pub struct ApplicationState {
+    // Kamera
+    pub cam_x: f32,
+    pub cam_y: f32,
+    pub cam_z: f32,
+    pub cam_yaw: f32,
+    pub cam_pitch: f32,
+
+    // Bewegungs-Flags (WASD)
+    pub w_pressed: bool,
+    pub a_pressed: bool,
+    pub s_pressed: bool,
+    pub d_pressed: bool,
+
+    // Licht & Schatten
+    pub light_intensity: f32,
+    pub ambient_strength: f32,
+    pub enable_ao_mode: u32,
+    pub current_shadow_mode: u32,
+    pub enable_key: u32,
+    pub enable_fill: u32,
+    pub enable_rim: u32,
+    pub dynamic_blend_factor: f32,
+
+    // 🟢 TENSOR 4: Umwelt-Register (Environmental Control)
+    pub key_light_x: f32,
+    pub key_light_y: f32,
+    pub key_light_z: f32,
+    pub key_r: f32,
+    pub key_g: f32,
+    pub key_b: f32,
+    pub bg_r: f32,
+    pub bg_g: f32,
+    pub bg_b: f32,
+    pub fog_density: f32,
+    pub fog_enabled: u32,
+
+    // 🟢 TENSOR 5: Tempel-Architektur (data-driven)
+    pub pillar_dist: f32,
+    pub pillar_thick: f32,
+    pub room_height: f32,
+    pub ceiling_thick: f32,
+    pub arch_radius: f32,
+    pub arch_height: f32,
+    pub decor_freq: f32,
+    pub decor_depth: f32,
+    pub decor_thick: f32,
+
+    // 🟢 TENSOR 6: Unendliche Raumfaltung (modulo grid)
+    pub cell_size: f32,
+    pub fold_speed: f32,
+}
+
+impl Default for ApplicationState {
+    fn default() -> Self {
+        Self {
+            cam_x: 0.0,
+            cam_y: 0.0,
+            cam_z: -5.0,
+            cam_yaw: 0.0,
+            cam_pitch: 0.0,
+            w_pressed: false,
+            a_pressed: false,
+            s_pressed: false,
+            d_pressed: false,
+            light_intensity: 1.0,
+            ambient_strength: 0.1,
+            enable_ao_mode: 1,
+            current_shadow_mode: 1,
+            enable_key: 1,
+            enable_fill: 1,
+            enable_rim: 1,
+            dynamic_blend_factor: 0.0,
+
+            // 🟢 TENSOR 4: Umwelt-Defaults (Blueprint: Environmental Control Tensor)
+            key_light_x: 4.0,
+            key_light_y: 7.0,
+            key_light_z: -4.0,
+            key_r: 1.00,
+            key_g: 0.95,
+            key_b: 0.85,
+            bg_r: 0.35,
+            bg_g: 0.45,
+            bg_b: 0.60,
+            fog_density: 0.5,
+            // Original-Kernel hatte keinen Nebel-Block → default AUS,
+            // damit die Szene exakt wie das Original aussieht.
+            fog_enabled: 0,
+
+            // 🟢 TENSOR 5: Tempel-Architektur-Defaults
+            pillar_dist: 5.0,
+            pillar_thick: 0.6,
+            room_height: 3.0,
+            ceiling_thick: 0.1,
+            arch_radius: 3.2,
+            arch_height: 1.0,
+            decor_freq: 2.0,
+            decor_depth: 0.03,
+            decor_thick: 0.01,
+
+            // 🟢 TENSOR 6: Raumfaltungs-Defaults
+            cell_size: 10.0,
+            fold_speed: 1.0,
+        }
+    }
+}
+
+impl ApplicationState {
+    /// Tensor 4 (Umwelt): Licht-Pos, Intensität, Key-RGB, Ambient, BG-RGB,
+    /// Nebel-Dichte, Nebel-Schalter, Padding. 16 f32 = 64 Bytes.
+    pub fn env_data(&self) -> [f32; 16] {
+        [
+            self.key_light_x,
+            self.key_light_y,
+            self.key_light_z,
+            self.light_intensity,
+            self.key_r,
+            self.key_g,
+            self.key_b,
+            self.ambient_strength,
+            self.bg_r,
+            self.bg_g,
+            self.bg_b,
+            self.fog_density,
+            self.fog_enabled as f32,
+            0.0,
+            0.0,
+            0.0,
+        ]
+    }
+
+    /// Tensor 5 (Architektur): Säulen, Raum, Bögen, Dekor. 12 f32 = 48 Bytes.
+    pub fn arch_data(&self) -> [f32; 12] {
+        [
+            self.pillar_dist,
+            self.pillar_thick,
+            self.room_height,
+            self.ceiling_thick,
+            self.arch_radius,
+            self.arch_height,
+            self.decor_freq,
+            self.decor_depth,
+            self.decor_thick,
+            0.0,
+            0.0,
+            0.0,
+        ]
+    }
+
+    /// Tensor 6 (Faltung): Zellgröße, halbe Zelle, Faltungs-Tempo. 4 f32 = 16 Bytes.
+    pub fn fold_data(&self) -> [f32; 4] {
+        [self.cell_size, self.cell_size * 0.5, self.fold_speed, 0.0]
+    }
+
+    /// Meta: active_slots = 0 → nur statische Architektur rendert
+    /// (deterministisch, verlässt sich nicht auf zeroed VRAM).
+    /// meta_handle = client.empty(4) = 4 Bytes = 1 f32!
+    pub fn meta_data(&self) -> [f32; 1] {
+        [0.0]
+    }
+}

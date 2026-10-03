@@ -1,0 +1,137 @@
+//! wgpui-View: `SurfaceExample` — Host der wgpu-Surface + Sidebar + Overlay.
+//!
+//! Der View ist rein deklarativ: Er rendert das Layout (Surface-Element,
+//! FPS-Overlay, Sidebar), draint den FPS-Channel und fängt Key-Events.
+//! Das eigentliche GPU-Rendering macht der Render-Thread (render_loop.rs).
+
+use crate::app_state::ApplicationState;
+use crate::gui::{self, GuiState};
+use std::sync::{Arc, Mutex};
+use wgpui_kit::{
+    div, px, rgb, wgpu_surface, Context, FocusHandle, IntoElement, InteractiveElement,
+    ParentElement, Render, Styled, Window, WgpuSurfaceHandle,
+};
+
+pub struct SurfaceExample {
+    pub surface: WgpuSurfaceHandle,
+    pub state: Arc<Mutex<ApplicationState>>,
+    pub fps_rx: std::sync::mpsc::Receiver<f64>,
+    pub display_fps: f64,
+    /// wgpui delivers key events only to the focused element (dispatch path:
+    /// window root -> focused node). Without focus, `on_key_down`/`on_key_up`
+    /// never fire, so we track + claim focus on the root div.
+    pub focus_handle: FocusHandle,
+    /// 🟢 GUI: kompletter UI-Zustand (Slider-Entities, Tabs, Accordions)
+    pub gui: GuiState,
+}
+
+/// Key-Down-Logik (WASD + Toggles). `held == true` bei OS-Key-Repeat →
+/// Toggles nur bei `!held` feuern lassen.
+fn handle_key_down(s: &mut ApplicationState, key: &str, held: bool) {
+    match key {
+        "w" | "W" => s.w_pressed = true,
+        "a" | "A" => s.a_pressed = true,
+        "s" | "S" => s.s_pressed = true,
+        "d" | "D" => s.d_pressed = true,
+        "1" if !held => s.enable_key = if s.enable_key == 1 { 0 } else { 1 },
+        "2" if !held => s.enable_fill = if s.enable_fill == 1 { 0 } else { 1 },
+        "3" if !held => s.enable_rim = if s.enable_rim == 1 { 0 } else { 1 },
+        "4" if !held => {
+            s.current_shadow_mode = if s.current_shadow_mode == 1 { 0 } else { 1 }
+        }
+        // 🟢 TENSOR 4: Umwelt-Steuerung (Blueprint: Environmental Control)
+        // Q/E : Licht-Intensität runter/hoch
+        "q" if !held => s.light_intensity = (s.light_intensity - 0.1).max(0.0),
+        "e" if !held => s.light_intensity = (s.light_intensity + 0.1).min(3.0),
+        // F/R : Ambient-Stärke runter/hoch
+        "f" if !held => s.ambient_strength = (s.ambient_strength - 0.05).max(0.0),
+        "r" if !held => s.ambient_strength = (s.ambient_strength + 0.05).min(1.0),
+        // O/L : Nebel-Dichte runter/hoch
+        "o" if !held => s.fog_density = (s.fog_density - 0.1).max(0.0),
+        "l" if !held => s.fog_density = (s.fog_density + 0.1).min(2.0),
+        // N : Nebel an/aus
+        "n" if !held => s.fog_enabled = if s.fog_enabled == 1 { 0 } else { 1 },
+        _ => {}
+    }
+}
+
+/// Key-Up-Logik (nur Bewegungs-Flags).
+fn handle_key_up(s: &mut ApplicationState, key: &str) {
+    match key {
+        "w" | "W" => s.w_pressed = false,
+        "a" | "A" => s.a_pressed = false,
+        "s" | "S" => s.s_pressed = false,
+        "d" | "D" => s.d_pressed = false,
+        _ => {}
+    }
+}
+
+impl Render for SurfaceExample {
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        while let Ok(f) = self.fps_rx.try_recv() {
+            self.display_fps = f;
+        }
+
+        window.request_animation_frame();
+
+        // wgpui only dispatches key events along the path root -> focused node.
+        // Claim focus on our root div so the WASD listeners actually receive
+        // key events. Re-claim whenever focus was lost (e.g. after clicking a
+        // Button, which grabs focus for itself).
+        if window.focused(_cx).as_ref() != Some(&self.focus_handle) {
+            window.focus(&self.focus_handle, _cx);
+        }
+
+        // If the OS window lost focus while a key was held (alt-tab), the
+        // key-up never arrives: clear stuck movement keys.
+        if !window.is_window_active() {
+            if let Ok(mut s) = self.state.lock() {
+                s.w_pressed = false;
+                s.a_pressed = false;
+                s.s_pressed = false;
+                s.d_pressed = false;
+            }
+        }
+
+        let state_key_down = self.state.clone();
+        let state_key_up = self.state.clone();
+
+        div()
+            .id("root")
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .flex()
+            .flex_row()
+            .bg(rgb(0x10121a))
+            .on_key_down(move |event, _win, _cx| {
+                if let Ok(mut s) = state_key_down.lock() {
+                    handle_key_down(&mut s, event.keystroke.key.as_str(), event.is_held);
+                }
+            })
+            .on_key_up(move |event, _win, _cx| {
+                if let Ok(mut s) = state_key_up.lock() {
+                    handle_key_up(&mut s, event.keystroke.key.as_str());
+                }
+            })
+            .child(
+                div()
+                    .flex_grow(1.0)
+                    .h_full()
+                    .child(wgpu_surface(self.surface.clone()).absolute().inset_0())
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(16.0))
+                            .left(px(16.0))
+                            .text_color(rgb(0x00ffcc))
+                            .text_xl()
+                            .child(format!("FPS: {:.1}", self.display_fps)),
+                    ),
+            )
+            // =========================================================
+            // 🟢 GUI: Sidebar aus dem separaten gui-Modul (Tabs + Accordions
+            // + Scrollbar — passt auf jeden Screen)
+            // =========================================================
+            .child(gui::sidebar(&mut self.gui, &self.state, window, _cx))
+    }
+}
