@@ -15,7 +15,16 @@ pub struct ApplicationState {
     pub slot_types: Vec<f32>,
     pub slot_sizes: Vec<f32>,
     pub slot_offsets_x: Vec<f32>,
+    pub slot_offsets_y: Vec<f32>, // 🟢 NEU: Jetzt als echter State-Vektor
     pub slot_offsets_z: Vec<f32>,
+    pub slot_r: Vec<f32>,
+    pub slot_g: Vec<f32>,
+    pub slot_b: Vec<f32>,
+    // 🟢 NEU: Die 4 parallelen Vektoren für das PBR-Modell
+    pub slot_roughness: Vec<f32>,
+    pub slot_metallic: Vec<f32>,
+    pub slot_emissive: Vec<f32>,
+    pub slot_specular: Vec<f32>,
     // Kamera
     pub cam_x: f32,
     pub cam_y: f32,
@@ -77,15 +86,19 @@ impl Default for ApplicationState {
             slot_types: vec![1.0, 2.0, 3.0, 0.0, 0.0],
             slot_sizes: vec![1.0, 1.0, 1.0, 1.0, 1.0],
             slot_offsets_x: vec![0.0, -1.8, 1.8, 0.0, 0.0],
+            slot_offsets_y: vec![0.0,  0.0, 0.0, 0.0, 0.0], // 🟢 Initialisiert auf der Nullebene
             slot_offsets_z: vec![0.0, 0.0, 0.0, 1.8, -1.8],
-        //
+            // Farb-Zuordnung (Rot, Grün, Blau, Weiß, Weiß)
+            slot_r:         vec![1.0, 0.0, 0.0, 1.0, 1.0],
+            slot_g:         vec![0.0, 1.0, 0.0, 1.0, 1.0],
+            slot_b:         vec![0.0, 0.0, 1.0, 1.0, 1.0],
         
-/*         // 🟢 NEU: Echte Material-Daten im CPU-State (verhindert Shader-Glitches)
-            slot_roughness: vec![0.5, 0.5, 0.5, 0.5, 0.5],
-            slot_metallic: vec![0.0, 0.0, 0.0, 0.0, 0.0],
-            slot_emissive: vec![0.0, 0.0, 0.0, 0.0, 0.0],
-            slot_specular: vec![0.5, 0.5, 0.5, 0.5, 0.5],
-*/
+            // 🟢 NEU: PBR-Startwerte für die 5 Slots aus der Doc
+            slot_roughness: vec![0.2, 0.5, 0.1, 0.5, 0.5], 
+            slot_metallic:  vec![1.0, 0.0, 0.8, 0.0, 0.0], 
+            slot_emissive:  vec![0.0, 0.0, 0.0, 0.0, 0.0],
+            slot_specular:  vec![1.0, 0.5, 1.0, 0.5, 0.5],
+            // ... restliche Felder ...
             cam_x: 0.0,
             cam_y: 0.0,
             cam_z: -5.0,
@@ -147,32 +160,38 @@ impl ApplicationState {
     /// Kernel erwartete Interleaved-Format [Typ, Größe, X, Z, ...].
      /// Slots-Tensor: Packt alle parallelen Slot-Vektoren in das vom 
     /// Kernel erwartete 8er-Stride Interleaved-Format [Typ, Größe, X, Y, Z, R, G, B, ...].
+    /// Slots-Tensor: Packt alle 8 CPU-Kanäle dynamisch und ohne Abstraktionsverlust
+    /// in das vom Kernel geforderte Stride-8 Interleaved Format.
     pub fn slots_data(&self) -> Vec<f32> {
-        // Kapazität auf 8 Werte pro Slot erhöhen
         let mut raw_data = Vec::with_capacity(self.slot_types.len() * 8);
         for i in 0..self.slot_types.len() {
-            raw_data.push(self.slot_types[i]);      // [0] Typ (1=Kristall, 2=Gyroid, 3=Torus)
-            raw_data.push(self.slot_sizes[i]);      // [1] Größe
-            raw_data.push(self.slot_offsets_x[i]);  // [2] Offset X
-            raw_data.push(0.0f32);                  // [3] Offset Y (Standard 0.0, da nicht in CPU-State)
-            raw_data.push(self.slot_offsets_z[i]);  // [4] Offset Z
-            raw_data.push(1.0f32);                  // [5] R (Farbe Weiß als Default)
-            raw_data.push(1.0f32);                  // [6] G
-            raw_data.push(1.0f32);                  // [7] B
+            raw_data.push(self.slot_types[i]);      // [0] Typ
+            raw_data.push(self.slot_sizes[i]);      // [1] Größe (Scale)
+            raw_data.push(self.slot_offsets_x[i]);  // [2] Position X
+            raw_data.push(self.slot_offsets_y[i]);  // [3] Position Y 🟢 (Jetzt dynamisch!)
+            raw_data.push(self.slot_offsets_z[i]);  // [4] Position Z
+            raw_data.push(self.slot_r[i]);          // [5] Farbe R 🟢
+            raw_data.push(self.slot_g[i]);          // [6] Farbe G 🟢
+            raw_data.push(self.slot_b[i]);          // [7] Farbe B 🟢
         }
         raw_data
     }
     
-    /// Materials-Tensor: Definiert Standard-Materialien für die Slots (Stride 4).
+    /// Materials-Tensor: Erzeugt das finale 400-f32 flache PBR-Register-Array
+    /// (100 Slots max * Stride 4). Verhindert unaligned cross-boundary reads.
     pub fn materials_data(&self) -> Vec<f32> {
-        let mut raw_data = Vec::with_capacity(self.slot_types.len() * 4);
-        for _ in 0..self.slot_types.len() {
-            raw_data.push(0.5f32);  // roughness (0.5 = matt/normal)
-            raw_data.push(0.0f32);  // metallic
-            raw_data.push(0.0f32);  // emissive
-            raw_data.push(0.5f32);  // specular (0.5 = Standard-Glanz)
+        const MAX_SLOTS: usize = 100;
+        let mut dynamic_materials = vec![0.0f32; MAX_SLOTS * 4]; // Flat 400 capacity
+        
+        for i in 0..self.slot_types.len() {
+            if i >= MAX_SLOTS { break; }
+            let base = i * 4;
+            dynamic_materials[base]     = self.slot_roughness[i];
+            dynamic_materials[base + 1] = self.slot_metallic[i];
+            dynamic_materials[base + 2] = self.slot_emissive[i];
+            dynamic_materials[base + 3] = self.slot_specular[i];
         }
-        raw_data
+        dynamic_materials
     }
 
 

@@ -27,18 +27,77 @@ pub struct SurfaceExample {
 
 /// Key-Down-Logik (WASD + Toggles). `held == true` bei OS-Key-Repeat →
 /// Toggles nur bei `!held` feuern lassen.
-fn handle_key_down(s: &mut ApplicationState, key: &str, held: bool) {
+fn handle_key_down(mut s: &mut ApplicationState, key: &str, held: bool) {
+let mut update_slot_color = |s: &mut ApplicationState, idx: usize| {
+    match s.slot_types[idx] as u32 {
+        1 => { s.slot_r[idx] = 1.0; s.slot_g[idx] = 0.0; s.slot_b[idx] = 0.0; } // Kristall -> Rot
+        2 => { s.slot_r[idx] = 0.0; s.slot_g[idx] = 1.0; s.slot_b[idx] = 0.0; } // Gyroid -> Grün
+        3 => { s.slot_r[idx] = 0.0; s.slot_g[idx] = 0.0; s.slot_b[idx] = 1.0; } // Torus -> Blau
+        _ => { s.slot_r[idx] = 1.0; s.slot_g[idx] = 1.0; s.slot_b[idx] = 1.0; } // Inaktiv -> Weiß
+    }
+};
     match key {
         "w" | "W" => s.w_pressed = true,
         "a" | "A" => s.a_pressed = true,
         "s" | "S" => s.s_pressed = true,
         "d" | "D" => s.d_pressed = true,
-        "1" if !held => s.enable_key = if s.enable_key == 1 { 0 } else { 1 },
+       /* "1" if !held => s.enable_key = if s.enable_key == 1 { 0 } else { 1 },
         "2" if !held => s.enable_fill = if s.enable_fill == 1 { 0 } else { 1 },
         "3" if !held => s.enable_rim = if s.enable_rim == 1 { 0 } else { 1 },
-        "4" if !held => {
-            s.current_shadow_mode = if s.current_shadow_mode == 1 { 0 } else { 1 }
+        "4" if !held => { s.current_shadow_mode = if s.current_shadow_mode == 1 { 0 } else { 1 } }
+        */
+        // 2️⃣ Slots 1 bis 5: Typen rotieren & Farben synchronisieren
+        "1" if !held => { 
+            s.current_selected_slot = 0; 
+            s.slot_types[0] = if s.slot_types[0] == 3.0 { 0.0 } else { s.slot_types[0] + 1.0 }; 
+            update_slot_color(&mut s, 0); 
         }
+        "2" if !held => { 
+            s.current_selected_slot = 1; 
+            s.slot_types[1] = if s.slot_types[1] == 3.0 { 0.0 } else { s.slot_types[1] + 1.0 }; 
+            update_slot_color(&mut s, 1); 
+        }
+        "3" if !held => { 
+            s.current_selected_slot = 2; 
+            s.slot_types[2] = if s.slot_types[2] == 3.0 { 0.0 } else { s.slot_types[2] + 1.0 }; 
+            update_slot_color(&mut s, 2); 
+        }
+        "4" if !held => { 
+            s.current_selected_slot = 3; 
+            s.slot_types[3] = if s.slot_types[3] == 3.0 { 0.0 } else { s.slot_types[3] + 1.0 }; 
+            update_slot_color(&mut s, 3); 
+        }
+        "5" if !held => { 
+            s.current_selected_slot = 4; 
+            s.slot_types[4] = if s.slot_types[4] == 3.0 { 0.0 } else { s.slot_types[4] + 1.0 }; 
+            update_slot_color(&mut s, 4); 
+        }
+
+        // 3️⃣ 🚀 TASTE "6": Vollkommen synchronisiertes Spawning zur Laufzeit
+        "6" if !held => {
+            s.current_selected_slot = 5;
+            if s.slot_types.len() <= 5 {
+                s.slot_types.push(1.0);     // Start als Kristall
+                s.slot_sizes.push(1.0);     
+                s.slot_offsets_x.push(0.0);
+                s.slot_offsets_y.push(0.0); 
+                s.slot_offsets_z.push(0.0);
+                
+                s.slot_r.push(1.0); s.slot_g.push(0.0); s.slot_b.push(0.0);
+
+                s.slot_roughness.push(0.3);
+                s.slot_metallic.push(0.0);
+                s.slot_emissive.push(0.0);
+                s.slot_specular.push(0.5);
+
+                s.active_slots_count = s.slot_types.len() as f32;
+                println!("[Space-Lab] 🚀 Slot 6 vollumfänglich im PBR-Verbund generiert!");
+            } else {
+                s.slot_types[5] = if s.slot_types[5] == 3.0 { 0.0 } else { s.slot_types[5] + 1.0 };
+                update_slot_color(&mut s, 5);
+            }
+        }
+        
         // 🟢 TENSOR 4: Umwelt-Steuerung (Blueprint: Environmental Control)
         // Q/E : Licht-Intensität runter/hoch
         "q" if !held => s.light_intensity = (s.light_intensity - 0.1).max(0.0),
