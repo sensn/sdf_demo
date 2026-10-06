@@ -32,6 +32,7 @@ pub struct SurfaceExample {
     pub mouse_sensitivity: f32,
      // 🟢 NEU: Steuert, ob das GUI-Overlay sichtbar ist
     pub show_gui: bool,
+    
 }
 
 /// Key-Down-Logik (WASD + Toggles). `held == true` bei OS-Key-Repeat →
@@ -200,7 +201,14 @@ impl Render for SurfaceExample {
                     handle_key_up(&mut s, event.keystroke.key.as_str());
                 }
             })
-            // --- IDIOMATISCHES MAUS-HANDLING IN WGPUI_KIT ---
+            
+                 // --- 1. DIE 3D-SZENEN-BASIS (Füllt das gesamte Fenster aus) ---
+            .child(
+                div()
+                    .size_full()
+                    .relative()  // Basis für den absoluten FPS-Zähler
+                    //
+                    // --- IDIOMATISCHES MAUS-HANDLING IN WGPUI_KIT ---
             // 🟢 Typ-Annotation direkt über den exportierten Root-Typen aufgelöst
             .on_mouse_move(_cx.listener(|this: &mut Self, event: &wgpui_kit::MouseMoveEvent, _win, _cx| {
                 // Holt die f32-Werte sicher aus der gekapselten Pixels-Struktur
@@ -253,11 +261,7 @@ impl Render for SurfaceExample {
                     }
                 }
             }))
-                 // --- 1. DIE 3D-SZENEN-BASIS (Füllt das gesamte Fenster aus) ---
-            .child(
-                div()
-                    .size_full()
-                    .relative()  // Basis für den absoluten FPS-Zähler
+                    //
                     .child(wgpu_surface(self.surface.clone()).absolute().inset_0())
                     .child(
                         div()
@@ -282,11 +286,22 @@ impl Render for SurfaceExample {
                         .bottom_0()
                         .w(px(320.0)) // Feste Breite für dein Slider-Menü
                         .h_full()
+                         // 🟢 NATIVE GPUI-LÖSUNG: Schützt die darunterliegende 3D-Fläche vor Maus-Events
+                        .occlude() 
                         // Ein edler, semitransparenter Hintergrund
                         .bg(wgpui_kit::rgba(0x10121ae6)) 
                         // 🟢 KORREKTUR: Schatten durch feine, dunkle Trennlinie links ersetzen
                         .border_l(px(1.0))
                         .border_color(rgb(0x1c1e26))
+                         // 🟢 NEU: Blockiert, dass Mausbewegungen an das Root-div (Kamera) durchgereicht werden
+                        // 1. 🟢 Fängt Klicks (Slider-Drücken) ab, bevor sie das Root-div erreichen
+                        //.capture_any_mouse_down(|_event, _win, _cx| {})
+                         // 🟢 KORREKTUR E0061: MouseButton::Left explizit übergeben
+                       // .on_mouse_down(wgpui_kit::MouseButton::Left, _cx.listener(|this: &mut Self, _event, win, _cx| {
+                       //     win.focus(&this.focus_handle, _cx);
+                       // }))
+                        // 2. 🟢 Fängt reine Mausbewegungen über der GUI ab
+                        //.on_mouse_move(|_event, _win, _cx| {})
                         // Hier wird deine bestehende Sidebar eingebettet
                         .child(gui::sidebar(&mut self.gui, &self.state, window, _cx))
                 )
