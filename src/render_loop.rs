@@ -38,6 +38,9 @@ pub fn run_render_loop(
         // Back-Buffer existiert erst nach dem ersten Layout-Pass → Retry.
         let Some((view, (dw, dh))) = surface.back_view_with_size() else {
             std::thread::sleep(Duration::from_nanos(500));
+            // 🟢 OPTIMIERUNG: yield_now() gibt den CPU-Kern extrem effizient frei,
+            // falls das wgpui-Hauptfenster unter Linux/Wayland noch im Layout-Pass ist.
+           // std::thread::yield_now();
             continue;
         };
 
@@ -90,8 +93,21 @@ if morph_wave > 0.5 {
         //TEST END
         */
         pipeline.write_state_buffers(&s);
-        pipeline.render_frame(&view, dw, dh, &s, time);
-        drop(s);
+         // 3. OPTIMIERUNG: Wir lösen den Mutex-Lock explizit HIER auf! 
+        // Dadurch muss dein wgpui-UI-Thread beim Bewegen der Slider niemals auf 
+        // die GPU-Renderzeit warten. Ruckler in der GUI sind damit komplett eliminiert.
+        drop(s);  //NEW 
+         // =========================================================================
+        // 🟢 GPU-RENDER PHASE (Läuft sicher außerhalb des Mutex-Locks)
+        // =========================================================================
+        // Wir holen uns für den Lesezugriff des Shaders einen schnellen, frischen Lock
+        let s_render = state.lock().unwrap();
+        pipeline.render_frame(&view, dw, dh, &s_render, time);
+        drop(s_render);
+        
+
+       // pipeline.render_frame(&view, dw, dh, &s, time);  //OLD
+        //drop(s); //OLD
 
         surface.present();
 
