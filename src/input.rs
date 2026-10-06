@@ -4,10 +4,33 @@ use crate::ApplicationState;
 /// Handles camera movement. Keyboard state (WASD) is owned by
 /// `ApplicationState` and updated via wgpui key events in `main.rs`
 /// (wgpui owns the winit event loop, so there is no direct winit access).
-/// Mouse rotation is read from a raw evdev thread (`/dev/input/mice`).
+///OLD: Mouse rotation is read from a raw evdev thread (`/dev/input/mice`).
+///NEW: Mouse rotation via wgpui in view.rs ( .on_mouse_move(_cx.listener(|this: &mut Self, event: &wgpui_kit::MouseMoveEvent, _win, _cx| {) and .on_scroll_wheel(_cx.listener(|this: &mut Self, event: &wgpui_kit::ScrollWheelEvent, _win, _cx| { )
 pub struct InputManager {
     pub camera_speed: f32,
-    pub mouse_sensitivity: f32,
+    // Platzhalter für zukünftige Gamepad-Events (z.B. Buttons/Achsen)
+    gamepad_receiver: Receiver<()>, 
+}
+
+impl InputManager {
+    pub fn new(camera_speed: f32) -> Self {
+        // Wir geben dem Channel explizit den leeren Typ `()`, damit E0282 verschwindet
+        let (_sender, receiver) = crossbeam_channel::unbounded::<()>();
+
+        // HIER KANNST DU SPÄTER DEINEN GILRS-GAMEPAD-THREAD SPAWNEN:
+        // std::thread::spawn(move || { ... });
+
+        Self {
+            camera_speed,
+            gamepad_receiver: receiver,
+        }
+    }
+
+
+/*
+pub struct InputManager {
+    pub camera_speed: f32,
+    //pub mouse_sensitivity: f32,
     mouse_receiver: Receiver<(f32, f32)>,
 }
 
@@ -33,13 +56,15 @@ impl InputManager {
 
         Self {
             camera_speed,
-            mouse_sensitivity,
-            mouse_receiver: receiver,
+          //  mouse_sensitivity,
+          //  mouse_receiver: receiver,
         }
     }
-
+*/
     pub fn update_camera_movement(&mut self, state: &mut ApplicationState, dt: f32) {
-        // --- 1. ROTATION (drain the raw mouse thread) ---
+       //OLD LINUX KERNEL MOUSE
+     /*
+             // --- 1. ROTATION (drain the raw mouse thread) ---
         let mut total_dx = 0.0;
         let mut total_dy = 0.0;
 
@@ -53,7 +78,7 @@ impl InputManager {
 
         let max_pitch = 89.0f32.to_radians();
         state.cam_pitch = state.cam_pitch.clamp(-max_pitch, max_pitch);
-
+*/
         // --- 2. MOVEMENT (W, A, S, D flags from wgpui key events) ---
         let move_dist = self.camera_speed * dt;
 

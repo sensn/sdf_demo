@@ -77,7 +77,7 @@ fn main() {
                         render_surface,
                         pipeline,
                         render_state,
-                        InputManager::new(2.5, 0.002),
+                        InputManager::new(8.5), // Camera speed  //OLD mouse handling viy input.rs - now directly via wgpui in view.rs !
                         fps_tx,
                     );
                 });
@@ -96,6 +96,10 @@ fn main() {
                         display_fps: 0.0,
                         focus_handle: cx.focus_handle(),
                         gui,
+                        // 🟢 INITIALISIERUNG FÜR DIE NEUEN STRUKTURFELDER:
+                        last_mouse_x: 0.0,
+                        last_mouse_y: 0.0,
+                        mouse_sensitivity: 0.002,
                     }
                 })
             })

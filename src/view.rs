@@ -23,6 +23,10 @@ pub struct SurfaceExample {
     pub focus_handle: FocusHandle,
     /// 🟢 GUI: kompletter UI-Zustand (Slider-Entities, Tabs, Accordions)
     pub gui: GuiState,
+    // 🟢 NEU: Speichert den Maus-Status direkt im View-Objekt
+    pub last_mouse_x: f32,
+    pub last_mouse_y: f32,
+    pub mouse_sensitivity: f32,
 }
 
 /// Key-Down-Logik (WASD + Toggles). `held == true` bei OS-Key-Repeat →
@@ -172,6 +176,59 @@ impl Render for SurfaceExample {
                     handle_key_up(&mut s, event.keystroke.key.as_str());
                 }
             })
+            // --- IDIOMATISCHES MAUS-HANDLING IN WGPUI_KIT ---
+            // 🟢 Typ-Annotation direkt über den exportierten Root-Typen aufgelöst
+            .on_mouse_move(_cx.listener(|this: &mut Self, event: &wgpui_kit::MouseMoveEvent, _win, _cx| {
+                // Holt die f32-Werte sicher aus der gekapselten Pixels-Struktur
+                let current_x = f32::from(event.position.x);
+                let current_y = f32::from(event.position.y);
+
+                // Delta-Berechnung (rein im f32-Raum)
+                let dx = current_x - this.last_mouse_x;
+                let dy = current_y - this.last_mouse_y;
+
+                if dx != 0.0 || dy != 0.0 {
+                    if let Ok(mut s) = this.state.lock() {
+                        let max_pitch = 89.0f32.to_radians();
+                        
+                        s.cam_yaw += dx * this.mouse_sensitivity;
+                        s.cam_pitch -= dy * this.mouse_sensitivity; 
+                        s.cam_pitch = s.cam_pitch.clamp(-max_pitch, max_pitch);
+                    }
+                }
+
+                // Werte für den nächsten Frame im Struct puffern
+                this.last_mouse_x = current_x;
+                this.last_mouse_y = current_y;
+            }))
+           // --- 2. TRACKPAD / MAUSRAD SCROLL HANDLING (KONSISTENT AN MAUS ANGEGLICHEN) ---
+            .on_scroll_wheel(_cx.listener(|this: &mut Self, event: &wgpui_kit::ScrollWheelEvent, _win, _cx| {
+                let (dx, dy) = match event.delta {
+                    // 1. Pixelgenaues Trackpad-Scrolling (Zwei-Finger-Geste)
+                    wgpui_kit::ScrollDelta::Pixels(point) => {
+                        // Vorzeichen gespiegelt, um der Bewegung des Mauszeigers zu entsprechen
+                        (-f32::from(point.x), -f32::from(point.y))
+                    }
+                    // 2. Klassisches Mausrad-Scrolling (in Zeilen gerastert)
+                    wgpui_kit::ScrollDelta::Lines(point) => {
+                        // Auch hier die Achsen an das visuelle Mausdelta anpassen
+                        (-point.x * 20.0, -point.y * 20.0)
+                    }
+                };
+
+                if dx != 0.0 || dy != 0.0 {
+                    if let Ok(mut s) = this.state.lock() {
+                        let max_pitch = 89.0f32.to_radians();
+                        
+                        // Sensitivität für Scroll-Events
+                        let scroll_sensitivity = this.mouse_sensitivity * 1.5; 
+
+                        s.cam_yaw += dx * scroll_sensitivity;
+                        s.cam_pitch -= dy * scroll_sensitivity; 
+                        s.cam_pitch = s.cam_pitch.clamp(-max_pitch, max_pitch);
+                    }
+                }
+            }))
             .child(
                 div()
                     .flex_grow(1.0)
