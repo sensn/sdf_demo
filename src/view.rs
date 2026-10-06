@@ -5,6 +5,9 @@
 //! Das eigentliche GPU-Rendering macht der Render-Thread (render_loop.rs).
 
 use crate::app_state::ApplicationState;
+// Am Anfang von src/view.rs zu deinen anderen Imports hinzufügen:
+use wgpui_kit::prelude::FluentBuilder;
+
 use crate::gui::{self, GuiState};
 use std::sync::{Arc, Mutex};
 use wgpui_kit::{
@@ -27,6 +30,8 @@ pub struct SurfaceExample {
     pub last_mouse_x: f32,
     pub last_mouse_y: f32,
     pub mouse_sensitivity: f32,
+     // 🟢 NEU: Steuert, ob das GUI-Overlay sichtbar ist
+    pub show_gui: bool,
 }
 
 /// Key-Down-Logik (WASD + Toggles). `held == true` bei OS-Key-Repeat →
@@ -51,6 +56,7 @@ let update_slot_color = |s: &mut ApplicationState, idx: usize| {
         "4" if !held => { s.current_shadow_mode = if s.current_shadow_mode == 1 { 0 } else { 1 } }
         */
         // 2️⃣ Slots 1 bis 5: Typen rotieren & Farben synchronisieren
+        
         "1" if !held => { 
             s.current_selected_slot = 0; 
             s.slot_types[0] = if s.slot_types[0] == 3.0 { 0.0 } else { s.slot_types[0] + 1.0 }; 
@@ -163,14 +169,32 @@ impl Render for SurfaceExample {
             .id("root")
             .track_focus(&self.focus_handle)
             .size_full()
-            .flex()
-            .flex_row()
+            .relative() // 🟢 WICHTIG: Erlaubt absoluten Kindern, sich an diesem Root auszurichten
+            //.flex()
+            //.flex_row()
             .bg(rgb(0x10121a))
-            .on_key_down(move |event, _win, _cx| {
-                if let Ok(mut s) = state_key_down.lock() {
-                    handle_key_down(&mut s, event.keystroke.key.as_str(), event.is_held);
+            //.on_key_down(move |event, _win, _cx| {
+             // 🟢 Nutzung von _cx.listener für exklusiven Zugriff auf `this` und `cx`
+// 🟢 Typ-Annotation hinzugefügt, um E0282 endgültig zu lösen
+            // --- 1. KEY DOWN HANDLER (Vollständig isoliert via _cx.listener) ---
+                 // --- 1. KEY DOWN HANDLER (Isoliert via _cx.listener) ---
+            .on_key_down(_cx.listener(|this: &mut Self, event: &wgpui_kit::KeyDownEvent, _win, cx| {
+                let key = event.keystroke.key.as_str();
+
+                // 1. Zuerst das GUI-Overlay umschalten, wenn "h" gedrückt wird
+                if (key == "h" || key == "H") && !event.is_held {
+                    this.show_gui = !this.show_gui;
+                    cx.notify(); 
+                    return; // Event vollständig verarbeitet, wir brechen hier ab
                 }
-            })
+
+                // 2. KORREKTUR E0373: Wir nutzen `this.state` direkt aus dem Struct.
+                // Dadurch wird keine äußere Variable (wie state_key_down) mehr gefangen.
+                if let Ok(mut s) = this.state.lock() {
+                    handle_key_down(&mut s, key, event.is_held);
+                }
+            })) // Hier schließt der Listener syntaktisch und typsicher
+
             .on_key_up(move |event, _win, _cx| {
                 if let Ok(mut s) = state_key_up.lock() {
                     handle_key_up(&mut s, event.keystroke.key.as_str());
@@ -229,10 +253,11 @@ impl Render for SurfaceExample {
                     }
                 }
             }))
+                 // --- 1. DIE 3D-SZENEN-BASIS (Füllt das gesamte Fenster aus) ---
             .child(
                 div()
-                    .flex_grow(1.0)
-                    .h_full()
+                    .size_full()
+                    .relative()  // Basis für den absoluten FPS-Zähler
                     .child(wgpu_surface(self.surface.clone()).absolute().inset_0())
                     .child(
                         div()
@@ -245,9 +270,26 @@ impl Render for SurfaceExample {
                     ),
             )
             // =========================================================
-            // 🟢 GUI: Sidebar aus dem separaten gui-Modul (Tabs + Accordions
-            // + Scrollbar — passt auf jeden Screen)
+            // 🟢 GUI OVERLAY: Schwebende Sidebar auf der rechten Seite
             // =========================================================
-            .child(gui::sidebar(&mut self.gui, &self.state, window, _cx))
+            // Dank des Imports von FluentBuilder funktioniert `.when` nun fehlerfrei!
+             .when(self.show_gui, |root| {
+                root.child(
+                    div()
+                        .absolute() // Löst das Element aus dem normalen UI-Fluss
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .w(px(320.0)) // Feste Breite für dein Slider-Menü
+                        .h_full()
+                        // Ein edler, semitransparenter Hintergrund
+                        .bg(wgpui_kit::rgba(0x10121ae6)) 
+                        // 🟢 KORREKTUR: Schatten durch feine, dunkle Trennlinie links ersetzen
+                        .border_l(px(1.0))
+                        .border_color(rgb(0x1c1e26))
+                        // Hier wird deine bestehende Sidebar eingebettet
+                        .child(gui::sidebar(&mut self.gui, &self.state, window, _cx))
+                )
+            })
     }
 }
