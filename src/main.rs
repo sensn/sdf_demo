@@ -6,12 +6,14 @@ use input::InputManager;
 
 // --- CUBECL IMPORTS (Kompatibel mit v0.11.0-pre.2) ---
 use cubecl::prelude::*;
-use cubecl::client::ComputeClient; // 🟢 KORREKTUR: client:: hinzufügen
+use cubecl::client::Client; // 🟢 KORREKTUR: client:: hinzufügen
 use cubecl::server::Handle; // 🟢 FIX: Direkt über das Haupt-Crate importieren
 use cubecl::frontend::{TensorArg, TensorBinding};
 
 // Alle wgpu-Backend-spezifischen Typen kommen nativ aus cubecl_wgpu
 use cubecl_wgpu::{WgpuRuntime, AutoCompiler, WgpuResource, WgpuSetup, init_device, RuntimeOptions};
+use cubecl_runtime::runtime::Runtime; // RICHTIG
+
 
 // (Falls benötigt für dein Projekt - bleibt unverändert)
 use cubecl_zspace::{Strides, Shape};
@@ -61,7 +63,7 @@ struct Application {
     pub config: wgpu::SurfaceConfiguration,
     
     // CubeCL resources
-    pub client: ComputeClient<WgpuRuntime<AutoCompiler>>,
+    pub client: Client,
     pub output_handle: Handle,
     
     // wgpu render resources
@@ -173,8 +175,12 @@ impl Application {
         
         let cubecl_device_id = init_device(wgpu_setup, RuntimeOptions::default());
         
-        let client: ComputeClient<WgpuRuntime<AutoCompiler>> = 
-            WgpuRuntime::client(&cubecl_device_id);
+       // let client: Client<WgpuRuntime<AutoCompiler>> = 
+       //     WgpuRuntime::client(&cubecl_device_id);
+// WgpuRuntime::client erfordert nun das importierte Runtime-Trait
+// Nutzt den AutoCompiler (empfohlen)
+let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cubecl_device_id);
+
 
         // 3. Create output buffer on the SHARED device (via CubeCL client)
         let output_handle = client.empty(byte_size);
@@ -494,10 +500,14 @@ fn render(&mut self) {
     let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     // 2. Extrahiere den nativen wgpu::Buffer aus dem CubeCL Handle
-    let managed_resource = self.client.get_resource(self.output_handle.clone()).unwrap();
-    let wgpu_resource = managed_resource.resource();
-    
-    let src_wgpu_buffer = &wgpu_resource.buffer;
+   // Ergänzen Sie die Turbofish-Syntax mit dem WgpuServer-Typen:
+let managed_resource = self.client
+    .get_resource::<cubecl_wgpu::WgpuServer<cubecl_wgpu::AutoCompiler>>(self.output_handle.clone())
+    .unwrap();
+
+let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
+let src_wgpu_buffer = &wgpu_resource.buffer;
+
     let buffer_offset = wgpu_resource.offset;
 
     // 3. Erstelle die Bind-Group mit dem ECHTEN CubeCL Ausgabe-Buffer
