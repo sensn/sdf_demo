@@ -1,5 +1,5 @@
 # Raymarching Renderer in CubeCL 0.11.0 with wgpui GUI
-![sdf_demo](images/mein-bild.png)
+![sdf_demo](assets/mein-bild.png)
 
 ## Build & run
 
