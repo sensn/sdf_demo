@@ -112,7 +112,7 @@ impl Default for ApplicationState {
             // ... restliche Felder ...
             cam_x: 0.0,
             cam_y: 0.0,
-            cam_z: -0.0,
+            cam_z: -5.0,
             cam_yaw: 0.0,
             cam_pitch: 0.0,
             w_pressed: false,
