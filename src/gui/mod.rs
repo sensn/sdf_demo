@@ -55,6 +55,7 @@ pub enum GuiTab {
     Architecture,
     Fold,
     Material,
+    Object, // 🟢 NEU: Objekt-Position/Scale/Rotation
     Controls,
 }
 
@@ -108,6 +109,14 @@ pub struct GuiState {
     pub mat_metallic_slider: Entity<SliderState>,
     pub mat_emissive_slider: Entity<SliderState>,
     pub mat_specular_slider: Entity<SliderState>,
+    // 🟢 NEU: OBJEKT-TENSOR (Position/Scale/Rotation, pro Slot):
+    pub obj_pos_x_slider: Entity<SliderState>,
+    pub obj_pos_y_slider: Entity<SliderState>,
+    pub obj_pos_z_slider: Entity<SliderState>,
+    pub obj_scale_slider: Entity<SliderState>,
+    pub obj_rot_x_slider: Entity<SliderState>,
+    pub obj_rot_y_slider: Entity<SliderState>,
+    pub obj_rot_z_slider: Entity<SliderState>,
 
     /// UI-Zustand
     pub tab_state: Entity<TabState>,
@@ -178,6 +187,22 @@ impl GuiState {
             cx.new(|_| SliderState::new().min(0.0).max(10.0).step(0.1).default_value(0.0));
         let mat_specular_slider =
             cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.5));
+        // --- 🟢 NEU: Objekt-Slider (Position/Scale/Rotation, schreiben in
+        //     slot_offsets/slot_sizes/slot_rot_* am Index current_selected_slot)
+        let obj_pos_x_slider =
+            cx.new(|_| SliderState::new().min(-10.0).max(10.0).step(0.1).default_value(0.0));
+        let obj_pos_y_slider =
+            cx.new(|_| SliderState::new().min(-10.0).max(10.0).step(0.1).default_value(0.0));
+        let obj_pos_z_slider =
+            cx.new(|_| SliderState::new().min(-10.0).max(10.0).step(0.1).default_value(0.0));
+        let obj_scale_slider =
+            cx.new(|_| SliderState::new().min(0.1).max(4.0).step(0.05).default_value(1.0));
+        let obj_rot_x_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(6.283).step(0.01).default_value(0.0));
+        let obj_rot_y_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(6.283).step(0.01).default_value(0.0));
+        let obj_rot_z_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(6.283).step(0.01).default_value(0.0));
 
         // --- Subscriptions (Slider -> ApplicationState)
         subscribe_slider(cx, &light_intensity_slider, state, |s, v| s.light_intensity = v);
@@ -223,6 +248,36 @@ impl GuiState {
             let i = s.current_selected_slot;
             if i < s.slot_specular.len() { s.slot_specular[i] = v; }
         });
+        // 🟢 NEU: Objekt-Position/Scale/Rotation — Slider schreibt in die
+        // parallelen Vektoren am Index des GEWÄHLTEN Slots (wie PBR).
+        subscribe_slider(cx, &obj_pos_x_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_offsets_x.len() { s.slot_offsets_x[i] = v; }
+        });
+        subscribe_slider(cx, &obj_pos_y_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_offsets_y.len() { s.slot_offsets_y[i] = v; }
+        });
+        subscribe_slider(cx, &obj_pos_z_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_offsets_z.len() { s.slot_offsets_z[i] = v; }
+        });
+        subscribe_slider(cx, &obj_scale_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_sizes.len() { s.slot_sizes[i] = v; }
+        });
+        subscribe_slider(cx, &obj_rot_x_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_rot_x.len() { s.slot_rot_x[i] = v; }
+        });
+        subscribe_slider(cx, &obj_rot_y_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_rot_y.len() { s.slot_rot_y[i] = v; }
+        });
+        subscribe_slider(cx, &obj_rot_z_slider, state, |s, v| {
+            let i = s.current_selected_slot;
+            if i < s.slot_rot_z.len() { s.slot_rot_z[i] = v; }
+        });
 
         // --- UI-Zustand: Tab 0 (Env) aktiv, erste Accordion-Gruppe offen
         let tab_state = cx.new(|_| TabState {
@@ -261,6 +316,13 @@ impl GuiState {
             mat_metallic_slider,
             mat_emissive_slider,
             mat_specular_slider,
+            obj_pos_x_slider,
+            obj_pos_y_slider,
+            obj_pos_z_slider,
+            obj_scale_slider,
+            obj_rot_x_slider,
+            obj_rot_y_slider,
+            obj_rot_z_slider,
             tab_state,
             accordion_state,
         }
@@ -302,6 +364,16 @@ impl GuiState {
             sync_one(&self.mat_metallic_slider, state.slot_metallic[sel], window, cx);
             sync_one(&self.mat_emissive_slider, state.slot_emissive[sel], window, cx);
             sync_one(&self.mat_specular_slider, state.slot_specular[sel], window, cx);
+        }
+        // 🟢 NEU: Objekt-Slider zeigt Position/Scale/Rotation des GEWÄHLTEN Slots.
+        if sel < state.slot_offsets_x.len() {
+            sync_one(&self.obj_pos_x_slider, state.slot_offsets_x[sel], window, cx);
+            sync_one(&self.obj_pos_y_slider, state.slot_offsets_y[sel], window, cx);
+            sync_one(&self.obj_pos_z_slider, state.slot_offsets_z[sel], window, cx);
+            sync_one(&self.obj_scale_slider, state.slot_sizes[sel], window, cx);
+            sync_one(&self.obj_rot_x_slider, state.slot_rot_x[sel], window, cx);
+            sync_one(&self.obj_rot_y_slider, state.slot_rot_y[sel], window, cx);
+            sync_one(&self.obj_rot_z_slider, state.slot_rot_z[sel], window, cx);
         }
     }
 }

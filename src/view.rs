@@ -51,6 +51,9 @@ let update_slot_color = |s: &mut ApplicationState, idx: usize| {
         "a" | "A" => s.a_pressed = true,
         "s" | "S" => s.s_pressed = true,
         "d" | "D" => s.d_pressed = true,
+        // 🟢 NEU: Kamera hoch/runter
+        "q" | "Q" => s.q_pressed = true,
+        "e" | "E" => s.e_pressed = true,
        /* "1" if !held => s.enable_key = if s.enable_key == 1 { 0 } else { 1 },
         "2" if !held => s.enable_fill = if s.enable_fill == 1 { 0 } else { 1 },
         "3" if !held => s.enable_rim = if s.enable_rim == 1 { 0 } else { 1 },
@@ -85,34 +88,39 @@ let update_slot_color = |s: &mut ApplicationState, idx: usize| {
         }
 
         // 3️⃣ 🚀 TASTE "6": Vollkommen synchronisiertes Spawning zur Laufzeit
-        "6" if !held => {
-            s.current_selected_slot = 5;
-            if s.slot_types.len() <= 5 {
-                s.slot_types.push(1.0);     // Start als Kristall
-                s.slot_sizes.push(1.0);     
-                s.slot_offsets_x.push(0.0);
-                s.slot_offsets_y.push(0.0); 
-                s.slot_offsets_z.push(0.0);
-                
-                s.slot_r.push(1.0); s.slot_g.push(0.0); s.slot_b.push(0.0);
-
-                s.slot_roughness.push(0.3);
-                s.slot_metallic.push(0.0);
-                s.slot_emissive.push(0.0);
-                s.slot_specular.push(0.5);
-
-                s.active_slots_count = s.slot_types.len() as f32;
-                println!("[Space-Lab] 🚀 Slot 6 vollumfänglich im PBR-Verbund generiert!");
-            } else {
-                s.slot_types[5] = if s.slot_types[5] == 3.0 { 0.0 } else { s.slot_types[5] + 1.0 };
-                update_slot_color(s, 5);
-            }
-        }
+       "6" if !held => {
+    s.current_selected_slot = 5;
+    if s.slot_types.len() <= 5 {
+        s.slot_types.push(1.0);     // Start als Kristall
+        s.slot_sizes.push(1.0);     
+        s.slot_offsets_x.push(0.0);
+        s.slot_offsets_y.push(0.0); 
+        s.slot_offsets_z.push(0.0);
         
+        s.slot_r.push(1.0); s.slot_g.push(0.0); s.slot_b.push(0.0);
+
+        s.slot_roughness.push(0.3);
+        s.slot_metallic.push(0.0);
+        s.slot_emissive.push(0.0);
+        s.slot_specular.push(0.5);
+
+        // 🛠️ HIER DIE FEHLENDEN ROTATIONS-TENSOR-PUSHES ERGÄNZEN:
+        s.slot_rot_x.push(0.0);
+        s.slot_rot_y.push(0.0);
+        s.slot_rot_z.push(0.0);
+
+        s.active_slots_count = s.slot_types.len() as f32;
+        println!("[Space-Lab] 🚀 Slot 6 vollumfänglich im PBR-Verbund generiert!");
+    } else {
+        s.slot_types[5] = if s.slot_types[5] == 3.0 { 0.0 } else { s.slot_types[5] + 1.0 };
+        update_slot_color(s, 5);
+    }
+}
+
         // 🟢 TENSOR 4: Umwelt-Steuerung (Blueprint: Environmental Control)
-        // Q/E : Licht-Intensität runter/hoch
-        "q" if !held => s.light_intensity = (s.light_intensity - 0.1).max(0.0),
-        "e" if !held => s.light_intensity = (s.light_intensity + 0.1).min(3.0),
+        // G/T : Licht-Intensität runter/hoch (Q/E ist jetzt Kamera hoch/runter)
+        "g" if !held => s.light_intensity = (s.light_intensity - 0.1).max(0.0),
+        "t" if !held => s.light_intensity = (s.light_intensity + 0.1).min(3.0),
         // F/R : Ambient-Stärke runter/hoch
         "f" if !held => s.ambient_strength = (s.ambient_strength - 0.05).max(0.0),
         "r" if !held => s.ambient_strength = (s.ambient_strength + 0.05).min(1.0),
@@ -132,6 +140,9 @@ fn handle_key_up(s: &mut ApplicationState, key: &str) {
         "a" | "A" => s.a_pressed = false,
         "s" | "S" => s.s_pressed = false,
         "d" | "D" => s.d_pressed = false,
+        // 🟢 NEU: Kamera hoch/runter
+        "q" | "Q" => s.q_pressed = false,
+        "e" | "E" => s.e_pressed = false,
         _ => {}
     }
 }

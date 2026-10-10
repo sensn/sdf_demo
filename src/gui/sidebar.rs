@@ -50,6 +50,7 @@ pub fn sidebar(
         )
         .child(Tab::new().label("Fold").selected(active == GuiTab::Fold))
         .child(Tab::new().label("Mat").selected(active == GuiTab::Material))
+        .child(Tab::new().label("Obj").selected(active == GuiTab::Object))
         .child(
             Tab::new()
                 .label("Ctrl")
@@ -61,6 +62,7 @@ pub fn sidebar(
                 1 => GuiTab::Architecture,
                 2 => GuiTab::Fold,
                 3 => GuiTab::Material,
+                4 => GuiTab::Object, // 🟢 NEU: Obj-Tab
                 _ => GuiTab::Controls,
             };
             tab_state.update(cx, |ts, cx| {
@@ -75,6 +77,7 @@ pub fn sidebar(
         GuiTab::Architecture => tabs::arch_tab(gui, state, cx).into_any_element(),
         GuiTab::Fold => tabs::fold_tab(gui, state, cx).into_any_element(),
         GuiTab::Material => tabs::mat_tab(gui, state, cx).into_any_element(),
+        GuiTab::Object => tabs::obj_tab(gui, state, cx).into_any_element(), // 🟢 NEU
         GuiTab::Controls => tabs::ctrl_tab(state).into_any_element(),
     };
 

@@ -52,6 +52,7 @@ const CUBE_DIM_Y: u32 = 4;
 /// env = 16 f32 (Tensor 4), arch = 12 f32 (Tensor 5), fold = 4 f32 (Tensor 6).
 const SLOTS_BYTES: usize = 800 * 4;
 const MATERIALS_BYTES: usize = 100 * 4 * 4; //(was *4)
+const ROTATIONS_BYTES: usize = 100 * 3 * 4; // 🟢 TENSOR 7: 100 Slots × Stride 3 (rotX, rotY, rotZ)
 const ENV_BYTES: usize = 16 * 4;
 const ARCH_BYTES: usize = 12 * 4;
 const FOLD_BYTES: usize = 4 * 4;
@@ -70,6 +71,7 @@ pub struct GpuPipeline {
     pub meta_handle: Handle,
     pub slots_handle: Handle,
     pub materials_handle: Handle,
+    pub rotations_handle: Handle, // 🟢 TENSOR 7: Objekt-Rotation
     pub env_handle: Handle,
     pub arch_handle: Handle,
     pub fold_handle: Handle,
@@ -119,6 +121,7 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
         let meta_handle = client.empty(4);
         let slots_handle = client.empty(SLOTS_BYTES);
         let materials_handle = client.empty(MATERIALS_BYTES);
+        let rotations_handle = client.empty(ROTATIONS_BYTES); // 🟢 TENSOR 7
         let env_handle = client.empty(ENV_BYTES);
         let arch_handle = client.empty(ARCH_BYTES);
         let fold_handle = client.empty(FOLD_BYTES);
@@ -219,6 +222,7 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
             meta_handle,
             slots_handle,
             materials_handle,
+            rotations_handle, // 🟢 TENSOR 7
             env_handle,
             arch_handle,
             fold_handle,
@@ -299,6 +303,8 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
         write(&self.slots_handle, bytemuck::cast_slice(&s.slots_data()));
          // 🚀 BEHOBEN: Schreibt die physischen PBR-Materialdaten in den VRAM-Buffer (Stride 4)
         write(&self.materials_handle, bytemuck::cast_slice(&s.materials_data()));
+        // 🟢 TENSOR 7: Schreibt die Rotations-Daten (Euler-Winkel) in den VRAM-Buffer (Stride 3)
+        write(&self.rotations_handle, bytemuck::cast_slice(&s.rotations_data()));
     }
 
     /// Ein kompletter Frame: Raymarch-Kernel-Launch + Blit auf den
@@ -349,6 +355,13 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
                 Shape::from(&[400usize]),  //was 100
             )
         };
+        let rotations_arg = unsafe {
+            TensorArg::from_raw_parts(
+                self.rotations_handle.clone(),
+                Strides::from(&[1usize]),
+                Shape::from(&[300usize]), // 🟢 TENSOR 7: 100 Slots × Stride 3
+            )
+        };
         let env_arg = unsafe {
             TensorArg::from_raw_parts(
                 self.env_handle.clone(),
@@ -379,6 +392,7 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
             meta_arg,
             slots_arg,
             materials_arg,
+           // rotations_arg, // 🟢 TENSOR 7
             env_arg,
             arch_arg,
             fold_arg,

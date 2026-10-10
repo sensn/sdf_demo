@@ -101,5 +101,12 @@ impl InputManager {
             state.cam_x += cos_yaw * move_dist;
             state.cam_z -= sin_yaw * move_dist;
         }
+        // 🟢 NEU: Kamera hoch/runter (Q/E) — unabhängig von Yaw/Pitch
+        if state.q_pressed {
+            state.cam_y += move_dist;
+        }
+        if state.e_pressed {
+            state.cam_y -= move_dist;
+        }
     }
 }

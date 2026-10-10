@@ -25,6 +25,10 @@ pub struct ApplicationState {
     pub slot_metallic: Vec<f32>,
     pub slot_emissive: Vec<f32>,
     pub slot_specular: Vec<f32>,
+    // 🟢 NEU: Rotations-Vektoren (Euler-Winkel in Radianten) pro Slot
+    pub slot_rot_x: Vec<f32>,
+    pub slot_rot_y: Vec<f32>,
+    pub slot_rot_z: Vec<f32>,
     // Kamera
     pub cam_x: f32,
     pub cam_y: f32,
@@ -37,6 +41,9 @@ pub struct ApplicationState {
     pub a_pressed: bool,
     pub s_pressed: bool,
     pub d_pressed: bool,
+    // 🟢 NEU: Kamera hoch/runter (Q/E)
+    pub q_pressed: bool,
+    pub e_pressed: bool,
 
     // Licht & Schatten
     pub light_intensity: f32,
@@ -98,16 +105,22 @@ impl Default for ApplicationState {
             slot_metallic:  vec![1.0, 0.0, 0.8, 0.0, 0.0], 
             slot_emissive:  vec![0.0, 0.0, 0.0, 0.0, 0.0],
             slot_specular:  vec![1.0, 0.5, 1.0, 0.5, 0.5],
+            // 🟢 NEU: Rotation (Euler-Winkel in Radianten) — initial 0
+            slot_rot_x: vec![0.0, 0.0, 0.0, 0.0, 0.0],
+            slot_rot_y: vec![0.0, 0.0, 0.0, 0.0, 0.0],
+            slot_rot_z: vec![0.0, 0.0, 0.0, 0.0, 0.0],
             // ... restliche Felder ...
             cam_x: 0.0,
             cam_y: 0.0,
-            cam_z: -5.0,
+            cam_z: -0.0,
             cam_yaw: 0.0,
             cam_pitch: 0.0,
             w_pressed: false,
             a_pressed: false,
             s_pressed: false,
             d_pressed: false,
+            q_pressed: false,
+            e_pressed: false,
             light_intensity: 1.0,
             ambient_strength: 0.1,
             enable_ao_mode: 1,
@@ -194,6 +207,25 @@ impl ApplicationState {
         dynamic_materials
     }
 
+
+    /// Rotations-Tensor: Erzeugt das flache Rotations-Register-Array
+    /// (100 Slots max * Stride 3 = 300 f32). Reihenfolge [rotX, rotY, rotZ] pro Slot.
+      /// Rotations-Tensor: Erzeugt das flache Rotations-Register-Array
+    /// (100 Slots max * Stride 3 = 300 f32). Reihenfolge [rotX, rotY, rotZ] pro Slot.
+    pub fn rotations_data(&self) -> Vec<f32> {
+        const MAX_SLOTS: usize = 100;
+        let mut dynamic_rotations = vec![0.0f32; MAX_SLOTS * 3];
+        for i in 0..self.slot_types.len() {
+            if i >= MAX_SLOTS { break; }
+            let base = i * 3;
+            
+            // Nutze .get(), um IndexOutOfBounds zu verhindern, falls die Arrays noch zu kurz sind
+            dynamic_rotations[base]     = *self.slot_rot_x.get(i).unwrap_or(&0.0f32);
+            dynamic_rotations[base + 1] = *self.slot_rot_y.get(i).unwrap_or(&0.0f32);
+            dynamic_rotations[base + 2] = *self.slot_rot_z.get(i).unwrap_or(&0.0f32);
+        }
+        dynamic_rotations
+    }
 
     /// Tensor 4 (Umwelt): Licht-Pos, Intensität, Key-RGB, Ambient, BG-RGB,
     /// Nebel-Dichte, Nebel-Schalter, Padding. 16 f32 = 64 Bytes.
