@@ -159,22 +159,103 @@ pub fn evaluate_dynamic_torus(p: Vec3, time: f32, size: f32) -> f32 {
     (q_x * q_x + rx_y * rx_y).sqrt() - r_minor
 }
 
+
+// ============================================================================
+// PARAMETER-STRUCTS (doc/params/params1-5.md)
+// Ersetzen die Index-basierten Parameter-Tensoren (meta/env/arch/fold) und
+// die 14 losen Launch-Skalare durch typisierte CubeLaunch-Structs.
+// Skalar-Felder landen im Info-Uniform (16-Byte-Alignment via cubecl
+// padded_size), NICHT in Storage-Buffern -> Budget 8 -> 4 (params1).
+// Flags/Counts als u32 (0/1), nie f32 (params3).
+// ============================================================================
+
+/// 16-Byte-Alignment fuer vec3-Parameter (params5): vec3 + explizites Pad.
+#[derive(CubeType, CubeLaunch, Clone, Copy)]
+#[cube(derive(Copy, Clone))]
+pub struct GpuVec3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub _pad: f32,
+}
+
+/// Kamera-Parameter (params5: "camera settings struct").
+#[derive(CubeType, CubeLaunch, Clone, Copy)]
+#[cube(derive(Copy, Clone))]
+pub struct CameraSettings {
+    pub position: GpuVec3,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+/// Umwelt-Parameter (ersetzt Tensor 4 / env_data()[16]).
+#[derive(CubeType, CubeLaunch, Clone, Copy)]
+#[cube(derive(Copy, Clone))]
+pub struct EnvSettings {
+    pub key_light_pos: GpuVec3, // war env[0..2]
+    pub light_intensity: f32,   // war env[3]
+    pub key_color: GpuVec3,     // war env[4..6]
+    pub ambient_strength: f32,  // war env[7]
+    pub bg_color: GpuVec3,      // war env[8..10]
+    pub fog_density: f32,       // war env[11]
+    pub fog_enabled: u32,       // war env[12] (f32) -> params3: u32-Flag 0/1
+}
+
+/// Tempel-Architektur (ersetzt Tensor 5 / arch_data()[12]).
+#[derive(CubeType, CubeLaunch, Clone, Copy)]
+#[cube(derive(Copy, Clone))]
+pub struct ArchParams {
+    pub pillar_dist: f32,   // war arch[0]
+    pub pillar_thick: f32,  // war arch[1]
+    pub room_height: f32,   // war arch[2]
+    pub ceiling_thick: f32, // war arch[3]
+    pub arch_radius: f32,   // war arch[4]
+    pub arch_height: f32,   // war arch[5]
+    pub decor_freq: f32,    // war arch[6]
+    pub decor_depth: f32,   // war arch[7]
+    pub decor_thick: f32,   // war arch[8]
+}
+
+/// Unendliche Raumfaltung (ersetzt Tensor 6 / fold_data()[4]).
+#[derive(CubeType, CubeLaunch, Clone, Copy)]
+#[cube(derive(Copy, Clone))]
+pub struct FoldParams {
+    pub cell_size: f32,  // war fold[0]
+    pub half_cell: f32,  // war fold[1]
+    pub fold_speed: f32, // war fold[2]
+}
+
+/// Frame-Parameter & Mode-Flags (ersetzt Meta-Tensor + 12 lose Skalare).
+#[derive(CubeType, CubeLaunch, Clone, Copy)]
+#[cube(derive(Copy, Clone))]
+pub struct RenderSettings {
+    pub time: f32,
+    pub width: u32,
+    pub height: u32,
+    pub blend_factor: f32,
+    pub active_slots: u32, // ersetzt meta[0] (f32) -> params3: Count als u32
+    pub shadow_mode: u32,
+    pub enable_ao_mode: u32,
+    pub enable_key: u32,
+    pub enable_fill: u32,
+    pub enable_rim: u32,
+}
+
 #[cube]
 pub fn scene_sdf(
     p: Vec3,
     time: f32,
     blend_factor: f32,
-    meta: &Tensor<f32>,
+    active_slots: u32,
     slots: &Tensor<f32>,
     materials: &Tensor<f32>, // 🟢 Dritter Tensor empfangen
-   //rotationss: &Tensor<f32>, // 🟢 TENSOR 7: Objekt-Rotation (Stride 3)
-    //    env_settings: &Tensor<f32>, // 🟢 Hier eingefügt
-    arch_params: &Tensor<f32>, // 🟢 TENSOR 5: Tempel-Architektur
-    fold_params: &Tensor<f32>, // 🟢 TENSOR 6: Unendliche Raumfaltung
+    rotations: &Tensor<f32>, // 🟢 TENSOR 7: Objekt-Rotation (Stride 3)
+    arch: ArchParams,        // 🟢 TENSOR 5 → Struct: Tempel-Architektur
+    fold: FoldParams,        // 🟢 TENSOR 6 → Struct: Unendliche Raumfaltung
 ) -> SdfResult {
     // 🟢 TENSOR 6: Modulo-Grid-Konstanten dynamisch aus dem Faltungs-Register
-    let cell_size = fold_params[usize::new(0)];
-    let half_cell = fold_params[usize::new(1)];
+    let cell_size = fold.cell_size;
+    let half_cell = fold.half_cell;
 
     let grid_p_x = p.x - cell_size * ((p.x + half_cell) / cell_size).floor();
     let grid_p_y = p.y - cell_size * ((p.y + half_cell) / cell_size).floor();
@@ -196,7 +277,7 @@ pub fn scene_sdf(
     let mut sum_spec = f32::new(0.0);
     let mut sum_w = f32::new(0.0); // Gesamtgewichtung
 
-    let active_slots = usize::cast_from(meta[usize::new(0)]);
+    let active_slots = usize::cast_from(active_slots);
 
     let mut i = usize::new(0);
     loop {
@@ -222,57 +303,45 @@ pub fn scene_sdf(
             let obj_metal = materials[mat_idx + usize::new(1)];
             let obj_emiss = materials[mat_idx + usize::new(2)];
             let obj_spec = materials[mat_idx + usize::new(3)];
-      /*
-                  // 🟢 TENSOR 7: Rotation auslesen (Stride 3: rotX, rotY, rotZ)
+            // TENSOR 7: Rotation auslesen (Stride 3: rotX, rotY, rotZ)
             let rot_idx = i * usize::new(3);
-            let rot_x = //rotationss[rot_idx];
-            let rot_y = //rotationss[rot_idx + usize::new(1)];
-            let rot_z = //rotationss[rot_idx + usize::new(2)];
-            let shifted_p_x = p.x - offset_x;
-            let shifted_p_y = p.y - offset_y;
-            let shifted_p_z = p.z - offset_z;
-            // 🟢 TENSOR 7: Euler-Rotation des Objekt-Raums (X → Y → Z angewandt)
-            // Rotation um X
-            let cx = rot_x.cos();
-            let sx = rot_x.sin();
-            let ry1 = shifted_p_y * cx - shifted_p_z * sx;
-            let rz1 = shifted_p_y * sx + shifted_p_z * cx;
-            // Rotation um Y
-            let cy = rot_y.cos();
-            let sy = rot_y.sin();
-            let rx2 = shifted_p_x * cy + rz1 * sy;
-            let rz2 = -shifted_p_x * sy + rz1 * cy;
-            // Rotation um Z
-            let cz = rot_z.cos();
-            let sz = rot_z.sin();
-            let rx3 = rx2 * cz - ry1 * sz;
-            let ry3 = rx2 * sz + ry1 * cz;
-            let rotated_p = Vec3::new(rx3, ry3, rz2);
-*/
-        /*
-                let grid_p_x =
-                rotated_p.x - cell_size * ((rotated_p.x + half_cell) / cell_size).floor();
-            let grid_p_y =
-                rotated_p.y - cell_size * ((rotated_p.y + half_cell) / cell_size).floor();
-            let grid_p_z =
-                rotated_p.z - cell_size * ((rotated_p.z + half_cell) / cell_size).floor();
-            let p_slot = Vec3::new(grid_p_x, grid_p_y, grid_p_z);
+            let rot_x = rotations[rot_idx];
+            let rot_y = rotations[rot_idx + usize::new(1)];
+            let rot_z = rotations[rot_idx + usize::new(2)];
 
-*/
             // 1. Die relative Position des Objekts berechnen (Translation)
             let shifted_p_x = p.x - offset_x;
             let shifted_p_y = p.y - offset_y;
             let shifted_p_z = p.z - offset_z;
 
             // =========================================================================
-            // 🟢 UNENDLICHES RAUMFALTUNGS-GRID (Zurück auf unrotiertes shifted_p geleitet)
+            // TENSOR 7: Inverse Euler-Rotation des Objekt-Raums (Z -> Y -> X rueckwaerts)
+            // Standard-SDF-Transform: Punkt in den lokalen Objektraum drehen.
+            // Alle Rotationen 0 -> Identitaet (kein visueller Unterschied zu vorher).
             // =========================================================================
-            // Da 'rotated_p' durch den Puffer-Rückbau pausiert ist, füttern wir das Modulo-Grid
-            // direkt mit 'shifted_p_x/y/z'. Das verhindert Compiler-Fehler bei 'p_slot'.
-            let grid_p_x = shifted_p_x - cell_size * ((shifted_p_x + half_cell) / cell_size).floor();
-            let grid_p_y = shifted_p_y - cell_size * ((shifted_p_y + half_cell) / cell_size).floor();
-            let grid_p_z = shifted_p_z - cell_size * ((shifted_p_z + half_cell) / cell_size).floor();
-            
+            // Inverse Rotation um Z
+            let cz = rot_z.cos();
+            let sz = rot_z.sin();
+            let rx1 = shifted_p_x * cz + shifted_p_y * sz;
+            let ry1 = -shifted_p_x * sz + shifted_p_y * cz;
+            // Inverse Rotation um Y
+            let cy = rot_y.cos();
+            let sy = rot_y.sin();
+            let rx2 = rx1 * cy - shifted_p_z * sy;
+            let rz2 = rx1 * sy + shifted_p_z * cy;
+            // Inverse Rotation um X
+            let cx = rot_x.cos();
+            let sx = rot_x.sin();
+            let ry3 = ry1 * cx + rz2 * sx;
+            let rz3 = -ry1 * sx + rz2 * cx;
+            let rotated_p = Vec3::new(rx2, ry3, rz3);
+
+            // =========================================================================
+            // UNENDLICHES RAUMFALTUNGS-GRID (auf rotierten lokalen Punkt)
+            // =========================================================================
+            let grid_p_x = rotated_p.x - cell_size * ((rotated_p.x + half_cell) / cell_size).floor();
+            let grid_p_y = rotated_p.y - cell_size * ((rotated_p.y + half_cell) / cell_size).floor();
+            let grid_p_z = rotated_p.z - cell_size * ((rotated_p.z + half_cell) / cell_size).floor();
             let p_slot = Vec3::new(grid_p_x, grid_p_y, grid_p_z);
 
             // Ab hier laufen deine Auswertungen wie gewohnt weiter:
@@ -343,15 +412,15 @@ pub fn scene_sdf(
     // =========================================================================
     // 🟢 TENSOR 5: ARCHITEKTUR-GENERIERUNG (Datengetrieben statt starr)
     // =========================================================================
-    let pillar_dist = arch_params[usize::new(0)];
-    let pillar_thick = arch_params[usize::new(1)];
-    let room_height = arch_params[usize::new(2)];
-    let ceiling_thick = arch_params[usize::new(3)];
-    let arch_radius = arch_params[usize::new(4)];
-    let arch_height = arch_params[usize::new(5)];
-    let decor_freq = arch_params[usize::new(6)];
-    let decor_depth = arch_params[usize::new(7)];
-    let decor_thick = arch_params[usize::new(8)];
+    let pillar_dist = arch.pillar_dist;
+    let pillar_thick = arch.pillar_thick;
+    let room_height = arch.room_height;
+    let ceiling_thick = arch.ceiling_thick;
+    let arch_radius = arch.arch_radius;
+    let arch_height = arch.arch_height;
+    let decor_freq = arch.decor_freq;
+    let decor_depth = arch.decor_depth;
+    let decor_thick = arch.decor_thick;
 
     let pillar_x = (local_p.x.abs() - pillar_dist).abs() - pillar_thick;
     let pillar_z = (local_p.z.abs() - pillar_dist).abs() - pillar_thick;
@@ -447,34 +516,26 @@ pub fn scene_sdf_normal(
     p: Vec3,
     time: f32,
     blend_factor: f32,
-    meta: &Tensor<f32>,
+    active_slots: u32,
     slots: &Tensor<f32>,
     materials: &Tensor<f32>,
-  //  //rotationss: &Tensor<f32>,
-      //  env_settings: &Tensor<f32>, // 🟢 NEU: Muss hier rein, um das Verschieben der Pointer zu stoppen!
-    arch_params: &Tensor<f32>,
-    fold_params: &Tensor<f32>,
+    rotations: &Tensor<f32>,
+    arch: ArchParams,
+    fold: FoldParams,
 ) -> Vec3 {
     let eps = f32::new(0.002);
-     
-   // let d_res = scene_sdf(p.clone(), time, blend_factor, meta, slots, materials, //rotationss, env_settings, arch_params, fold_params).d;
-
-    let d_res = scene_sdf(p.clone(), time, blend_factor, meta, slots, materials,
-     //rotationss,
-      arch_params, fold_params);
+    let d_res = scene_sdf(p.clone(), time, blend_factor, active_slots, slots, materials,
+      rotations, arch, fold);
     let d = d_res.d;
     let p_x = Vec3::new(p.x + eps, p.y, p.z);
     let p_y = Vec3::new(p.x, p.y + eps, p.z);
     let p_z = Vec3::new(p.x, p.y, p.z + eps);
-    let nx = scene_sdf(p_x, time, blend_factor, meta, slots, materials,
-     //rotationss,
-      arch_params, fold_params).d - d;
-    let ny = scene_sdf(p_y, time, blend_factor, meta, slots, materials,
-     //rotationss,
-      arch_params, fold_params).d - d;
-    let nz = scene_sdf(p_z, time, blend_factor, meta, slots, materials,
-     //rotationss,
-      arch_params, fold_params).d - d;
+    let nx = scene_sdf(p_x, time, blend_factor, active_slots, slots, materials,
+      rotations, arch, fold).d - d;
+    let ny = scene_sdf(p_y, time, blend_factor, active_slots, slots, materials,
+      rotations, arch, fold).d - d;
+    let nz = scene_sdf(p_z, time, blend_factor, active_slots, slots, materials,
+      rotations, arch, fold).d - d;
     Vec3::new(nx, ny, nz).normalize()
 }
 
@@ -484,12 +545,12 @@ pub fn calculate_soft_shadow(
     rd: Vec3,
     time: f32,
     blend_factor: f32,
-    meta: &Tensor<f32>,
+    active_slots: u32,
     slots: &Tensor<f32>,
     materials: &Tensor<f32>,
-   //rotationss: &Tensor<f32>,
-    arch_params: &Tensor<f32>,
-    fold_params: &Tensor<f32>,
+    rotations: &Tensor<f32>,
+    arch: ArchParams,
+    fold: FoldParams,
 ) -> f32 {
     let mut res = f32::new(1.0);
     let mut t = f32::new(0.04);
@@ -505,9 +566,8 @@ pub fn calculate_soft_shadow(
         let current_rd = rd.clone();
         let p = current_ro.add(current_rd.scale(t));
         // FIX: add PBR_MATERIALS Tensor-ref
-        let sdf_res = scene_sdf(p, time, blend_factor, meta, slots, materials,
-        //rotationss,
-          arch_params, fold_params);
+        let sdf_res = scene_sdf(p, time, blend_factor, active_slots, slots, materials,
+          rotations, arch, fold);
         let h = sdf_res.d;
 
         if h < f32::new(0.001) {
@@ -532,12 +592,12 @@ pub fn calculate_ao(
     normal: Vec3,
     time: f32,
     blend_factor: f32,
-    meta: &Tensor<f32>,
+    active_slots: u32,
     slots: &Tensor<f32>,
     materials: &Tensor<f32>,
-   //rotationss: &Tensor<f32>,
-    arch_params: &Tensor<f32>,
-    fold_params: &Tensor<f32>,
+    rotations: &Tensor<f32>,
+    arch: ArchParams,
+    fold: FoldParams,
 ) -> f32 {
     let mut occ = f32::new(0.0);
     let mut sca = f32::new(1.0);
@@ -555,9 +615,8 @@ pub fn calculate_ao(
         let ao_pos = current_p.add(current_normal.scale(hr));
 
         // 🟢 FIX: Nutzen der neuen 2-Tensor-Signatur (meta, slots) statt config
-        let sdf_res = scene_sdf(ao_pos, time, blend_factor, meta, slots, materials,
-         //rotationss,
-          arch_params, fold_params);
+        let sdf_res = scene_sdf(ao_pos, time, blend_factor, active_slots, slots, materials,
+          rotations, arch, fold);
         let dd = sdf_res.d;
 
         occ += (hr - dd) * sca;
@@ -677,64 +736,51 @@ pub fn cook_torrance_light(
 #[cube(launch)]
 pub fn raymarch_sdf_kernel(
     output: &mut Tensor<f32>, // 🟢 OPTIMIERT: Jetzt f32 statt u32!
-    meta: &Tensor<f32>,
-    slots: &Tensor<f32>,
-    materials: &Tensor<f32>,
-   //rotationss: &Tensor<f32>, // 🟢 TENSOR 7: Objekt-Rotation
-    env_settings: &Tensor<f32>, // 🟢 TENSOR 4: Umwelt-Parameter (Licht, Ambient, Nebel)
-    arch_params: &Tensor<f32>,  // 🟢 TENSOR 5: Tempel-Architektur
-    fold_params: &Tensor<f32>,  // 🟢 TENSOR 6: Unendliche Raumfaltung
-    time: f32,
-    width: u32,
-    height: u32,
-    shadow_mode: u32,
-    cam_x: f32,
-    cam_y: f32,
-    cam_z: f32,
-    blend_factor: f32,
-    enable_ao_mode: u32,
-    cam_yaw: f32,
-    cam_pitch: f32,
-    enable_key: u32,
-    enable_fill: u32,
-    enable_rim: u32,
+    slots: &Tensor<f32>,      // 🟢 Stride 8: (type, x, y, z, scale, anim, blend, mat_id)
+    materials: &Tensor<f32>,  // 🟢 Stride 4: PBR-Daten
+    rotations: &Tensor<f32>,  // 🟢 TENSOR 7: Objekt-Rotation (Stride 3)
+    camera: CameraSettings,   // 🟢 params5: Kamera-Struct (16-Byte-Alignment)
+    env: EnvSettings,         // 🟢 TENSOR 4 → Struct: Umwelt-Parameter
+    arch: ArchParams,         // 🟢 TENSOR 5 → Struct: Tempel-Architektur
+    fold: FoldParams,         // 🟢 TENSOR 6 → Struct: Unendliche Raumfaltung
+    render: RenderSettings,   // 🟢 Meta-Tensor + 12 Skalare → Struct
 ) {
     let x = ABSOLUTE_POS_X;
     let y = ABSOLUTE_POS_Y;
 
-    let w_val = width;
-    let h_val = height;
-    let t_val = time;
-    let b_factor = blend_factor;
+    let w_val = render.width;
+    let h_val = render.height;
+    let t_val = render.time;
+    let b_factor = render.blend_factor;
 
     if x < w_val && y < h_val {
     
     
         // =========================================================================
-        // 🟢 TENSOR 4: DYNAMISCHE EXTRAKTION DER UMWELT-REGISTER
+        // 🟢 PARAMETER-STRUCTS: Umwelt direkt aus EnvSettings (params2/params4)
         // =========================================================================
         // Block 0: Licht-Vektor und Intensität
         let key_light_pos = Vec3::new(
-            env_settings[usize::new(0)],
-            env_settings[usize::new(1)],
-            env_settings[usize::new(2)],
+            env.key_light_pos.x,
+            env.key_light_pos.y,
+            env.key_light_pos.z,
         );
-        let l_intensity = env_settings[usize::new(3)];
+        let l_intensity = env.light_intensity;
 
         // Block 1: Licht-Farben und globale Umgebung
-        let key_r = env_settings[usize::new(4)];
-        let key_g = env_settings[usize::new(5)];
-        let key_b = env_settings[usize::new(6)];
-        let a_strength = env_settings[usize::new(7)];
+        let key_r = env.key_color.x;
+        let key_g = env.key_color.y;
+        let key_b = env.key_color.z;
+        let a_strength = env.ambient_strength;
 
         // Block 2: Hintergrund-Farbe und Nebel-Dichte
-        let bg_r = env_settings[usize::new(8)];
-        let bg_g = env_settings[usize::new(9)];
-        let bg_b = env_settings[usize::new(10)];
-        let fog_density = env_settings[usize::new(11)];
+        let bg_r = env.bg_color.x;
+        let bg_g = env.bg_color.y;
+        let bg_b = env.bg_color.z;
+        let fog_density = env.fog_density;
 
-        // Block 3: Schalter
-        let fog_enabled = env_settings[usize::new(12)];
+        // Block 3: Schalter (params3: u32-Flag 0/1)
+        let fog_enabled = env.fog_enabled;
 
         let w_f = f32::cast_from(w_val);
         let h_f = f32::cast_from(h_val);
@@ -742,13 +788,12 @@ pub fn raymarch_sdf_kernel(
         let uv_x = (f32::cast_from(x) - (w_f / f32::new(2.0))) / h_f;
         let uv_y = ((h_f / f32::new(2.0)) - f32::cast_from(y)) / h_f;
 
-        let ro = Vec3::new(cam_x, cam_y, cam_z);
+        let ro = Vec3::new(camera.position.x, camera.position.y, camera.position.z);
         let rd = Vec3::new(uv_x, uv_y, f32::new(1.2));
-
-        let cos_y = cam_yaw.cos();
-        let sin_y = cam_yaw.sin();
-        let cos_p = cam_pitch.cos();
-        let sin_p = cam_pitch.sin();
+        let cos_y = camera.yaw.cos();
+        let sin_y = camera.yaw.sin();
+        let cos_p = camera.pitch.cos();
+        let sin_p = camera.pitch.sin();
 
         let rd_y1 = rd.y * cos_p - rd.z * sin_p;
         let rd_z1 = rd.y * sin_p + rd.z * cos_p;
@@ -785,9 +830,8 @@ pub fn raymarch_sdf_kernel(
             let current_rd = final_rd.clone();
             let p = current_ro.add(current_rd.scale(t));
 
-            let step_res = scene_sdf(p, t_val, b_factor, meta, slots, materials,
-             //rotationss,
-              arch_params, fold_params);
+            let step_res = scene_sdf(p, t_val, b_factor, render.active_slots, slots, materials,
+              rotations, arch, fold);
 
             hit_d = step_res.d;
             hit_r = step_res.r;
@@ -821,9 +865,8 @@ pub fn raymarch_sdf_kernel(
 
         if hit_dist < f32::new(40.0) {
             let p = ro.add(final_rd.scale(hit_dist));
-            let normal = scene_sdf_normal(p.clone(), t_val, b_factor, meta, slots, materials,
-             //rotationss,
-              arch_params, fold_params);
+            let normal = scene_sdf_normal(p.clone(), t_val, b_factor, render.active_slots, slots, materials,
+              rotations, arch, fold);
 
             // 🟢 TENSOR 4: Key-Licht-Position dynamisch aus dem Umwelt-Register
             let fill_light_pos = Vec3::new(f32::new(-5.0), f32::new(3.0), f32::new(-3.0));
@@ -837,21 +880,19 @@ pub fn raymarch_sdf_kernel(
 
             // 🟢 Schatten nur aufs Key-Licht (wie bisher)
             let mut key_visibility = f32::new(1.0);
-            if shadow_mode == u32::new(1) {
+            if render.shadow_mode == u32::new(1) {
                 let offset_p = p.add(normal.scale(f32::new(0.02)));
                 let shadow_factor = calculate_soft_shadow(
-                    offset_p, key_dir.clone(), t_val, b_factor, meta, slots, materials,
-                    //rotationss,
-                     arch_params, fold_params,
+                    offset_p, key_dir.clone(), t_val, b_factor, render.active_slots, slots, materials,
+                     rotations, arch, fold,
                 );
                 key_visibility = shadow_factor;
             }
 
             let mut ao_factor = f32::new(1.0);
-            if enable_ao_mode == u32::new(1) {
-                ao_factor = calculate_ao(p, normal.clone(), t_val, b_factor, meta, slots, materials, 
-                //rotationss,
-                 arch_params, fold_params);
+            if render.enable_ao_mode == u32::new(1) {
+                ao_factor = calculate_ao(p, normal.clone(), t_val, b_factor, render.active_slots, slots, materials,
+                 rotations, arch, fold);
             }
 
             // 🟢 TENSOR 4: Licht-Farben (Key dynamisch, Fill/Rim fix)
@@ -859,9 +900,9 @@ pub fn raymarch_sdf_kernel(
             let fill_color = Vec3::new(f32::new(0.25), f32::new(0.40), f32::new(0.60));
             let rim_color = Vec3::new(f32::new(0.50), f32::new(0.70), f32::new(1.00));
 
-            let key_on = enable_key != u32::new(0);
-            let fill_on = enable_fill != u32::new(0);
-            let rim_on = enable_rim != u32::new(0);
+            let key_on = render.enable_key != u32::new(0);
+            let fill_on = render.enable_fill != u32::new(0);
+            let rim_on = render.enable_rim != u32::new(0);
 
             let albedo = Vec3::new(hit_r, hit_g, hit_b);
 
@@ -923,7 +964,7 @@ pub fn raymarch_sdf_kernel(
         // 🟢 TENSOR 4: DYNAMISCHE NEBEL-KOMPOSITION (Puffer-gesteuert)
         // =====================================================================
         let mut fog = f32::new(1.0);
-        if fog_enabled > f32::new(0.5) {
+        if fog_enabled > u32::new(0) {
             // Nutzt fog_density dynamisch als Teiler für die Nebel-Kompression
             fog = (f32::new(40.0) - hit_dist) / (f32::new(40.0) - (f32::new(15.0) * fog_density));
             if fog > f32::new(1.0) {

@@ -163,10 +163,24 @@ impl Default for ApplicationState {
     }
 }
 
+use crate::kernel::{
+    ArchParamsLaunch, CameraSettingsLaunch, EnvSettingsLaunch, FoldParamsLaunch,
+    GpuVec3Launch, RenderSettingsLaunch,
+};
+
 impl ApplicationState {
-    /// Meta-Tensor: Enthält die aktuelle Anzahl aktiver Slots für die GPU.
-    pub fn meta_data(&self) -> [f32; 1] {
-        [self.active_slots_count]
+    /// Kamera-Struct (params5): Position + Yaw/Pitch als 16-Byte-Alignment-Struct.
+    pub fn camera_launch(&self) -> CameraSettingsLaunch {
+        CameraSettingsLaunch {
+            position: GpuVec3Launch {
+                x: self.cam_x,
+                y: self.cam_y,
+                z: self.cam_z,
+                _pad: 0.0,
+            },
+            yaw: self.cam_yaw,
+            pitch: self.cam_pitch,
+        }
     }
 
     /// Slots-Tensor: Packt alle parallelen Slot-Vektoren in das vom 
@@ -227,56 +241,74 @@ impl ApplicationState {
         dynamic_rotations
     }
 
-    /// Tensor 4 (Umwelt): Licht-Pos, Intensität, Key-RGB, Ambient, BG-RGB,
-    /// Nebel-Dichte, Nebel-Schalter, Padding. 16 f32 = 64 Bytes.
-    pub fn env_data(&self) -> [f32; 16] {
-        [
-            self.key_light_x,
-            self.key_light_y,
-            self.key_light_z,
-            self.light_intensity,
-            self.key_r,
-            self.key_g,
-            self.key_b,
-            self.ambient_strength,
-            self.bg_r,
-            self.bg_g,
-            self.bg_b,
-            self.fog_density,
-            self.fog_enabled as f32,
-            0.0,
-            0.0,
-            0.0,
-        ]
+    /// Umwelt-Struct (ersetzt Tensor 4 / env_data()[16]): Licht, Farben, Nebel.
+    /// fog_enabled als u32-Flag 0/1 (params3) statt f32.
+    pub fn env_launch(&self) -> EnvSettingsLaunch {
+        EnvSettingsLaunch {
+            key_light_pos: GpuVec3Launch {
+                x: self.key_light_x,
+                y: self.key_light_y,
+                z: self.key_light_z,
+                _pad: 0.0,
+            },
+            light_intensity: self.light_intensity,
+            key_color: GpuVec3Launch {
+                x: self.key_r,
+                y: self.key_g,
+                z: self.key_b,
+                _pad: 0.0,
+            },
+            ambient_strength: self.ambient_strength,
+            bg_color: GpuVec3Launch {
+                x: self.bg_r,
+                y: self.bg_g,
+                z: self.bg_b,
+                _pad: 0.0,
+            },
+            fog_density: self.fog_density,
+            fog_enabled: self.fog_enabled,
+        }
     }
 
-    /// Tensor 5 (Architektur): Säulen, Raum, Bögen, Dekor. 12 f32 = 48 Bytes.
-    pub fn arch_data(&self) -> [f32; 12] {
-        [
-            self.pillar_dist,
-            self.pillar_thick,
-            self.room_height,
-            self.ceiling_thick,
-            self.arch_radius,
-            self.arch_height,
-            self.decor_freq,
-            self.decor_depth,
-            self.decor_thick,
-            0.0,
-            0.0,
-            0.0,
-        ]
+    /// Architektur-Struct (ersetzt Tensor 5 / arch_data()[12]).
+    pub fn arch_launch(&self) -> ArchParamsLaunch {
+        ArchParamsLaunch {
+            pillar_dist: self.pillar_dist,
+            pillar_thick: self.pillar_thick,
+            room_height: self.room_height,
+            ceiling_thick: self.ceiling_thick,
+            arch_radius: self.arch_radius,
+            arch_height: self.arch_height,
+            decor_freq: self.decor_freq,
+            decor_depth: self.decor_depth,
+            decor_thick: self.decor_thick,
+        }
     }
 
-    /// Tensor 6 (Faltung): Zellgröße, halbe Zelle, Faltungs-Tempo. 4 f32 = 16 Bytes.
-    pub fn fold_data(&self) -> [f32; 4] {
-        [self.cell_size, self.cell_size * 0.5, self.fold_speed, 0.0]
+    /// Faltungs-Struct (ersetzt Tensor 6 / fold_data()[4]).
+    pub fn fold_launch(&self) -> FoldParamsLaunch {
+        FoldParamsLaunch {
+            cell_size: self.cell_size,
+            half_cell: self.cell_size * 0.5,
+            fold_speed: self.fold_speed,
+        }
     }
 
-    // Meta: active_slots = 0 → nur statische Architektur rendert
-    // (deterministisch, verlässt sich nicht auf zeroed VRAM).
-    // meta_handle = client.empty(4) = 4 Bytes = 1 f32!
-   // pub fn meta_data(&self) -> [f32; 1] {
-     //   [0.0]
-  //  }
+    /// Render-Struct (ersetzt Meta-Tensor + 12 lose Launch-Skalare).
+    /// active_slots als u32-Count (params3).
+    pub fn render_launch(&self, time: f32, width: u32, height: u32) -> RenderSettingsLaunch {
+        RenderSettingsLaunch {
+            time,
+            width,
+            height,
+            blend_factor: self.dynamic_blend_factor,
+            active_slots: self.active_slots_count as u32,
+            shadow_mode: self.current_shadow_mode,
+            enable_ao_mode: self.enable_ao_mode,
+            enable_key: self.enable_key,
+            enable_fill: self.enable_fill,
+            enable_rim: self.enable_rim,
+        }
+    }
+
 }

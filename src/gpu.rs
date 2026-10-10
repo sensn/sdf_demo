@@ -48,14 +48,12 @@ const CUBE_DIM_X: u32 = 16;
 const CUBE_DIM_Y: u32 = 4;
 
 /// Buffer-Größen (Bytes) für die Kernel-Register.
-/// meta = 1 f32, slots = 800 f32, materials = 100 f32,
-/// env = 16 f32 (Tensor 4), arch = 12 f32 (Tensor 5), fold = 4 f32 (Tensor 6).
+/// Nur noch große dynamische Daten als Storage-Buffer (params1/params4):
+/// slots = 800 f32, materials = 400 f32, rotations = 300 f32.
+/// meta/env/arch/fold sind entfallen → CubeLaunch-Structs im Info-Uniform.
 const SLOTS_BYTES: usize = 800 * 4;
-const MATERIALS_BYTES: usize = 100 * 4 * 4; //(was *4)
+const MATERIALS_BYTES: usize = 100 * 4 * 4;
 const ROTATIONS_BYTES: usize = 100 * 3 * 4; // 🟢 TENSOR 7: 100 Slots × Stride 3 (rotX, rotY, rotZ)
-const ENV_BYTES: usize = 16 * 4;
-const ARCH_BYTES: usize = 12 * 4;
-const FOLD_BYTES: usize = 4 * 4;
 
 /// Alles, was der Render-Thread zum Zeichnen eines Frames braucht.
 pub struct GpuPipeline {
@@ -68,13 +66,9 @@ pub struct GpuPipeline {
     pub resolution: ResolutionUniform,
     /// Raymarch-Output (RGB f32): w*h*3*4 Bytes. Wird bei Resize ersetzt.
     pub output_handle: Handle,
-    pub meta_handle: Handle,
     pub slots_handle: Handle,
     pub materials_handle: Handle,
     pub rotations_handle: Handle, // 🟢 TENSOR 7: Objekt-Rotation
-    pub env_handle: Handle,
-    pub arch_handle: Handle,
-    pub fold_handle: Handle,
     bind_group: Option<wgpu::BindGroup>,
 }
 
@@ -118,13 +112,9 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
 
         // --- Kernel-Register-Buffer ---
         let output_handle = client.empty(output_byte_size(width, height));
-        let meta_handle = client.empty(4);
         let slots_handle = client.empty(SLOTS_BYTES);
         let materials_handle = client.empty(MATERIALS_BYTES);
         let rotations_handle = client.empty(ROTATIONS_BYTES); // 🟢 TENSOR 7
-        let env_handle = client.empty(ENV_BYTES);
-        let arch_handle = client.empty(ARCH_BYTES);
-        let fold_handle = client.empty(FOLD_BYTES);
 
         // --- wgpu-Blit: Raymarch-Buffer → Back-Buffer ---
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -219,13 +209,9 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
             resolution_buffer,
             resolution,
             output_handle,
-            meta_handle,
             slots_handle,
             materials_handle,
             rotations_handle, // 🟢 TENSOR 7
-            env_handle,
-            arch_handle,
-            fold_handle,
             bind_group: None,
         };
         pipeline.rebuild_bind_group();
@@ -295,13 +281,10 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
         
         self.queue.write_buffer(&wgpu_res.buffer, wgpu_res.offset, data);
     };
-        write(&self.env_handle, bytemuck::cast_slice(&s.env_data()));
-        write(&self.arch_handle, bytemuck::cast_slice(&s.arch_data()));
-        write(&self.fold_handle, bytemuck::cast_slice(&s.fold_data()));
-        write(&self.meta_handle, bytemuck::cast_slice(&s.meta_data()));
-        // 🚀 NEU: Schreibt die interleaved gepackten Slot-Daten in den VRAM-Buffer
+        // 🚀 Nur noch echte dynamische Arrays als Storage-Buffer (params4).
+        // meta/env/arch/fold/camera/render reisen als CubeLaunch-Structs im
+        // Info-Uniform — kein write_buffer mehr nötig (params2/params4).
         write(&self.slots_handle, bytemuck::cast_slice(&s.slots_data()));
-         // 🚀 BEHOBEN: Schreibt die physischen PBR-Materialdaten in den VRAM-Buffer (Stride 4)
         write(&self.materials_handle, bytemuck::cast_slice(&s.materials_data()));
         // 🟢 TENSOR 7: Schreibt die Rotations-Daten (Euler-Winkel) in den VRAM-Buffer (Stride 3)
         write(&self.rotations_handle, bytemuck::cast_slice(&s.rotations_data()));
@@ -334,13 +317,7 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
                 Shape::from(&[total_pixels]),
             )
         };
-        let meta_arg = unsafe {
-            TensorArg::from_raw_parts(
-                self.meta_handle.clone(),
-                Strides::from(&[1usize]),
-                Shape::from(&[1usize]),
-            )
-        };
+
         let slots_arg = unsafe {
             TensorArg::from_raw_parts(
                 self.slots_handle.clone(),
@@ -362,54 +339,23 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
                 Shape::from(&[300usize]), // 🟢 TENSOR 7: 100 Slots × Stride 3
             )
         };
-        let env_arg = unsafe {
-            TensorArg::from_raw_parts(
-                self.env_handle.clone(),
-                Strides::from(&[1usize]),
-                Shape::from(&[16usize]),
-            )
-        };
-        let arch_arg = unsafe {
-            TensorArg::from_raw_parts(
-                self.arch_handle.clone(),
-                Strides::from(&[1usize]),
-                Shape::from(&[12usize]),
-            )
-        };
-        let fold_arg = unsafe {
-            TensorArg::from_raw_parts(
-                self.fold_handle.clone(),
-                Strides::from(&[1usize]),
-                Shape::from(&[4usize]),
-            )
-        };
+
+
+
 
         crate::kernel::raymarch_sdf_kernel::launch(
             &self.client,
             cube_count,
             cube_dim,
             output_arg,
-            meta_arg,
             slots_arg,
             materials_arg,
-           // rotations_arg, // 🟢 TENSOR 7
-            env_arg,
-            arch_arg,
-            fold_arg,
-            time,
-            dw,
-            dh,
-            s.current_shadow_mode,
-            s.cam_x,
-            s.cam_y,
-            s.cam_z,
-            s.dynamic_blend_factor,
-            s.enable_ao_mode,
-            s.cam_yaw,
-            s.cam_pitch,
-            s.enable_key,
-            s.enable_fill,
-            s.enable_rim,
+            rotations_arg, // 🟢 TENSOR 7: jetzt aktiv
+            s.camera_launch(),
+            s.env_launch(),
+            s.arch_launch(),
+            s.fold_launch(),
+            s.render_launch(time, dw, dh),
         );
 
         // --- Blit: Raymarch-Buffer → Surface-Back-Buffer ---
