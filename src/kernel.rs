@@ -560,14 +560,15 @@ pub fn calculate_soft_shadow(
 
     let mut step = u32::new(0);
     loop {
-        if step >= u32::new(32) {
+        // 📉 OPTIMIERUNG 1: Testweise auf 24 Schritte reduzieren, falls 32 noch zu langsam ist
+        if step >= u32::new(24) { 
             break;
         }
 
         let current_ro = ro.clone();
         let current_rd = rd.clone();
         let p = current_ro.add(current_rd.scale(t));
-        // FIX: add PBR_MATERIALS Tensor-ref
+        
         let sdf_res = scene_sdf(p, time, blend_factor, active_slots, slots, materials,
           rotations, arch, fold);
         let h = sdf_res.d;
@@ -576,7 +577,17 @@ pub fn calculate_soft_shadow(
             res = f32::new(0.0);
             break;
         }
+        
         res = res.min(f32::new(8.0) * h / t);
+        
+        // 🟢 MASSIVER FPS-BOOST: Early Exit im Kernschatten
+        // Wenn es bereits fast komplett schwarz ist, rechenintensiven Strahl stoppen!
+        if res < f32::new(0.02) {
+            res = f32::new(0.0);
+            break;
+        }
+
+        // Schrittweite dynamisch anpassen
         t += h.max(f32::new(0.04));
         if t > t_max {
             break;
@@ -587,6 +598,7 @@ pub fn calculate_soft_shadow(
 
     res.max(f32::new(0.2))
 }
+
 
 #[cube]
 pub fn calculate_ao(
@@ -604,30 +616,25 @@ pub fn calculate_ao(
     let mut occ = f32::new(0.0);
     let mut sca = f32::new(1.0);
 
-    let mut i = u32::new(1);
-    loop {
-        if i >= u32::new(5) {
-            break;
-        }
-
+    // 🟢 OPTIMIERUNG 2: Schleife komplett entrollen
+    // Schaltet jeglichen Branch-Overhead für die AO-Berechnung aus
+    #[unroll]
+    for i in 1..5 {
         let current_p = p.clone();
         let current_normal = normal.clone();
 
-        let hr = f32::cast_from(i) * f32::new(0.15);
+        // i als f32 berechnen
+        let hr = f32::new(i as f32) * f32::new(0.15);
         let ao_pos = current_p.add(current_normal.scale(hr));
 
-        // 🟢 FIX: Nutzen der neuen 2-Tensor-Signatur (meta, slots) statt config
         let sdf_res = scene_sdf(ao_pos, time, blend_factor, active_slots, slots, materials,
           rotations, arch, fold);
         let dd = sdf_res.d;
 
         occ += (hr - dd) * sca;
         sca *= f32::new(0.90);
-
-        i += u32::new(1);
     }
 
-    // 🟢 FIX: Rückgabewert vervollständigt
     (f32::new(1.0) - (occ * f32::new(0.5))).max(f32::new(0.3))
 }
 
