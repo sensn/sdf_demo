@@ -247,9 +247,9 @@ pub fn scene_sdf(
     time: f32,
     blend_factor: f32,
     active_slots: u32,
-    slots: &Tensor<f32>,
-    materials: &Tensor<f32>, // 🟢 Dritter Tensor empfangen
-    rotations: &Tensor<f32>, // 🟢 TENSOR 7: Objekt-Rotation (Stride 3)
+    slots: &[f32],
+    materials: &[f32], // 🟢 Dritter Tensor empfangen
+    rotations: &[f32], // 🟢 TENSOR 7: Objekt-Rotation (Stride 3)
     arch: ArchParams,        // 🟢 TENSOR 5 → Struct: Tempel-Architektur
     fold: FoldParams,        // 🟢 TENSOR 6 → Struct: Unendliche Raumfaltung
 ) -> SdfResult {
@@ -517,9 +517,9 @@ pub fn scene_sdf_normal(
     time: f32,
     blend_factor: f32,
     active_slots: u32,
-    slots: &Tensor<f32>,
-    materials: &Tensor<f32>,
-    rotations: &Tensor<f32>,
+    slots: &[f32],
+    materials: &[f32],
+    rotations: &[f32],
     arch: ArchParams,
     fold: FoldParams,
 ) -> Vec3 {
@@ -546,9 +546,9 @@ pub fn calculate_soft_shadow(
     time: f32,
     blend_factor: f32,
     active_slots: u32,
-    slots: &Tensor<f32>,
-    materials: &Tensor<f32>,
-    rotations: &Tensor<f32>,
+    slots: &[f32],
+    materials: &[f32],
+    rotations: &[f32],
     arch: ArchParams,
     fold: FoldParams,
 ) -> f32 {
@@ -593,9 +593,9 @@ pub fn calculate_ao(
     time: f32,
     blend_factor: f32,
     active_slots: u32,
-    slots: &Tensor<f32>,
-    materials: &Tensor<f32>,
-    rotations: &Tensor<f32>,
+    slots: &[f32],
+    materials: &[f32],
+    rotations: &[f32],
     arch: ArchParams,
     fold: FoldParams,
 ) -> f32 {
@@ -736,9 +736,7 @@ pub fn cook_torrance_light(
 #[cube(launch)]
 pub fn raymarch_sdf_kernel(
     output: &mut Tensor<f32>, // 🟢 OPTIMIERT: Jetzt f32 statt u32!
-    slots: &Tensor<f32>,      // 🟢 Stride 8: (type, x, y, z, scale, anim, blend, mat_id)
-    materials: &Tensor<f32>,  // 🟢 Stride 4: PBR-Daten
-    rotations: &Tensor<f32>,  // 🟢 TENSOR 7: Objekt-Rotation (Stride 3)
+    scene: &[f32], // 📦 Der einzige, gepackte Mega-Buffer  // 🟢 TENSOR 7: Objekt-Rotation (Stride 3)
     camera: CameraSettings,   // 🟢 params5: Kamera-Struct (16-Byte-Alignment)
     env: EnvSettings,         // 🟢 TENSOR 4 → Struct: Umwelt-Parameter
     arch: ArchParams,         // 🟢 TENSOR 5 → Struct: Tempel-Architektur
@@ -753,6 +751,26 @@ pub fn raymarch_sdf_kernel(
     let t_val = render.time;
     let b_factor = render.blend_factor;
 
+
+//
+   // --- Konstanten für das automatische Slicing ---
+      // --- Konstanten für das automatische Slicing (Jetzt sauber als usize) ---
+    const MAX_SLOTS: usize = 100;
+    
+    const SLOTS_SIZE: usize = MAX_SLOTS * 8;      // 800
+    const MATERIALS_SIZE: usize = MAX_SLOTS * 4;  // 400
+    const ROTATIONS_SIZE: usize = MAX_SLOTS * 3;  // 300
+
+    const SLOTS_START: usize = 0;
+    const MATERIALS_START: usize = SLOTS_SIZE;                     // 800
+    const ROTATIONS_START: usize = MATERIALS_START + MATERIALS_SIZE; // 1200
+    const TOTAL_SIZE: usize = ROTATIONS_START + ROTATIONS_SIZE;    // 1500
+
+    // 🟢 KORRIGIERT: Slices nutzen jetzt usize-Ranges, was CubeCL perfekt versteht
+    let slots = &scene[SLOTS_START..MATERIALS_START];
+    let materials = &scene[MATERIALS_START..ROTATIONS_START];
+    let rotations = &scene[ROTATIONS_START..TOTAL_SIZE];
+//
     if x < w_val && y < h_val {
     
     

@@ -66,9 +66,9 @@ pub struct GpuPipeline {
     pub resolution: ResolutionUniform,
     /// Raymarch-Output (RGB f32): w*h*3*4 Bytes. Wird bei Resize ersetzt.
     pub output_handle: Handle,
-    pub slots_handle: Handle,
-    pub materials_handle: Handle,
-    pub rotations_handle: Handle, // 🟢 TENSOR 7: Objekt-Rotation
+    // 📦 REFAKTORIERT: Ein einziger Mega-Buffer statt 3 Einzelslots!
+    pub scene_handle: Handle, 
+
     bind_group: Option<wgpu::BindGroup>,
 }
 
@@ -111,11 +111,19 @@ impl GpuPipeline {
 let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cubecl_device_id);
 
         // --- Kernel-Register-Buffer ---
-        let output_handle = client.empty(output_byte_size(width, height));
-        let slots_handle = client.empty(SLOTS_BYTES);
-        let materials_handle = client.empty(MATERIALS_BYTES);
-        let rotations_handle = client.empty(ROTATIONS_BYTES); // 🟢 TENSOR 7
+      // --- Kernel-Register-Buffer ---
+let output_handle = client.empty(output_byte_size(width, height));
 
+// 📐 1. Buffer-Größen exakt berechnen (basierend auf f32 = 4 Bytes)
+const MAX_SLOTS: usize = 100;
+const SLOTS_BYTES: usize = MAX_SLOTS * 8 * 4;      // 800 * 4 = 3200 Bytes
+const MATERIALS_BYTES: usize = MAX_SLOTS * 4 * 4;  // 400 * 4 = 1600 Bytes
+const ROTATIONS_BYTES: usize = MAX_SLOTS * 3 * 4;  // 300 * 4 = 1200 Bytes
+
+const TOTAL_SCENE_BYTES: usize = SLOTS_BYTES + MATERIALS_BYTES + ROTATIONS_BYTES; // 6000 Bytes
+
+// 📦 2. Nur noch EIN Handle allokieren
+let scene_handle = client.empty(TOTAL_SCENE_BYTES);
         // --- wgpu-Blit: Raymarch-Buffer → Back-Buffer ---
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Screen Shader"),
@@ -209,9 +217,7 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
             resolution_buffer,
             resolution,
             output_handle,
-            slots_handle,
-            materials_handle,
-            rotations_handle, // 🟢 TENSOR 7
+            scene_handle, // 🟢 Jetzt kompakt verpackt
             bind_group: None,
         };
         pipeline.rebuild_bind_group();
@@ -284,11 +290,12 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
         // 🚀 Nur noch echte dynamische Arrays als Storage-Buffer (params4).
         // meta/env/arch/fold/camera/render reisen als CubeLaunch-Structs im
         // Info-Uniform — kein write_buffer mehr nötig (params2/params4).
-        write(&self.slots_handle, bytemuck::cast_slice(&s.slots_data()));
-        write(&self.materials_handle, bytemuck::cast_slice(&s.materials_data()));
-        // 🟢 TENSOR 7: Schreibt die Rotations-Daten (Euler-Winkel) in den VRAM-Buffer (Stride 3)
-        write(&self.rotations_handle, bytemuck::cast_slice(&s.rotations_data()));
-    }
+        // 📦 REFAKTORIERT & OPTIMIERT: 
+    // Alle 3 Register-Tabelle (Slots, Materials, Rotations) reisen jetzt 
+    // voll-ausgerichtet als ein einziger Mega-Buffer (6000 Bytes) zur GPU!
+    let packed_scene = s.scene_data();
+    write(&self.scene_handle, bytemuck::cast_slice(&packed_scene));
+}
 
     /// Ein kompletter Frame: Raymarch-Kernel-Launch + Blit auf den
     /// Back-Buffer. `time`/`dt` in Sekunden.
@@ -317,7 +324,32 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
                 Shape::from(&[total_pixels]),
             )
         };
+        // 2. 🟢 NEU: Erzeuge die BufferArgs direkt aus deinen Handles und den exakten Element-Längen
+// 2. 🟢 HIER GEHÖRT ES HIN: Die BufferArgs werden auf CPU-Ebene sicher zugewiesen
+const MAX_SLOTS: usize = 100;
 
+// 1. Berechne die genauen Element-Größen basierend auf MAX_SLOTS
+const SLOTS_COUNT: usize = MAX_SLOTS * 8;      // 100 * 8 = 800
+const MATERIALS_COUNT: usize = MAX_SLOTS * 4;  // 100 * 4 = 400
+const ROTATIONS_COUNT: usize = MAX_SLOTS * 3;  // 100 * 3 = 300
+const TOTAL_BUFFER_SIZE: usize = SLOTS_COUNT + MATERIALS_COUNT + ROTATIONS_COUNT; // 1500
+
+// 2. Erstellung des einzelnen BufferArg für CubeCL
+let scene_arg = unsafe {
+    cubecl::prelude::BufferArg::from_raw_parts(self.scene_handle.clone(), TOTAL_BUFFER_SIZE)
+};
+
+/*
+let (slots_arg, materials_arg, rotations_arg) = unsafe {
+    (
+        cubecl::prelude::BufferArg::from_raw_parts(self.slots_handle.clone(), 800),
+        cubecl::prelude::BufferArg::from_raw_parts(self.materials_handle.clone(), 400),
+        cubecl::prelude::BufferArg::from_raw_parts(self.rotations_handle.clone(), 300),
+    )
+};
+
+*/
+/*
         let slots_arg = unsafe {
             TensorArg::from_raw_parts(
                 self.slots_handle.clone(),
@@ -340,7 +372,7 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
             )
         };
 
-
+*/
 
 
         crate::kernel::raymarch_sdf_kernel::launch(
@@ -348,9 +380,7 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
             cube_count,
             cube_dim,
             output_arg,
-            slots_arg,
-            materials_arg,
-            rotations_arg, // 🟢 TENSOR 7: jetzt aktiv
+            scene_arg,
             s.camera_launch(),
             s.env_launch(),
             s.arch_launch(),

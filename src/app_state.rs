@@ -189,57 +189,52 @@ impl ApplicationState {
     /// Kernel erwartete 8er-Stride Interleaved-Format [Typ, Größe, X, Y, Z, R, G, B, ...].
     /// Slots-Tensor: Packt alle 8 CPU-Kanäle dynamisch und ohne Abstraktionsverlust
     /// in das vom Kernel geforderte Stride-8 Interleaved Format.
-    pub fn slots_data(&self) -> Vec<f32> {
-        let mut raw_data = Vec::with_capacity(self.slot_types.len() * 8);
-        for i in 0..self.slot_types.len() {
-            raw_data.push(self.slot_types[i]);      // [0] Typ
-            raw_data.push(self.slot_sizes[i]);      // [1] Größe (Scale)
-            raw_data.push(self.slot_offsets_x[i]);  // [2] Position X
-            raw_data.push(self.slot_offsets_y[i]);  // [3] Position Y 🟢 (Jetzt dynamisch!)
-            raw_data.push(self.slot_offsets_z[i]);  // [4] Position Z
-            raw_data.push(self.slot_r[i]);          // [5] Farbe R 🟢
-            raw_data.push(self.slot_g[i]);          // [6] Farbe G 🟢
-            raw_data.push(self.slot_b[i]);          // [7] Farbe B 🟢
-        }
-        raw_data
-    }
+  /// Packt Slots, Materials und Rotations in einen einzigen, zusammenhängenden f32-Buffer (Größe: 1500 f32s)
+pub fn scene_data(&self) -> Vec<f32> {
+    const MAX_SLOTS: usize = 100;
     
-    /// Materials-Tensor: Erzeugt das finale 400-f32 flache PBR-Register-Array
-    /// (100 Slots max * Stride 4). Verhindert unaligned cross-boundary reads.
-    pub fn materials_data(&self) -> Vec<f32> {
-        const MAX_SLOTS: usize = 100;
-        let mut dynamic_materials = vec![0.0f32; MAX_SLOTS * 4]; // Flat 400 capacity
-        
-        for i in 0..self.slot_types.len() {
-            if i >= MAX_SLOTS { break; }
-            let base = i * 4;
-            dynamic_materials[base]     = self.slot_roughness[i];
-            dynamic_materials[base + 1] = self.slot_metallic[i];
-            dynamic_materials[base + 2] = self.slot_emissive[i];
-            dynamic_materials[base + 3] = self.slot_specular[i];
-        }
-        dynamic_materials
+    // Gesamtgröße: (100 * 8) + (100 * 4) + (100 * 3) = 1500 Elemente
+    const TOTAL_SIZE: usize = (MAX_SLOTS * 8) + (MAX_SLOTS * 4) + (MAX_SLOTS * 3);
+    
+    // Mit Nullen vorinitialisieren, damit ungenutzte Slots sichere Standardwerte haben
+    let mut packed_data = vec![0.0f32; TOTAL_SIZE];
+    
+    // Exakte Start-Offsets im Ziel-Array definieren
+    let slots_offset = 0;
+    let materials_offset = MAX_SLOTS * 8;                  // Index 800
+    let rotations_offset = materials_offset + (MAX_SLOTS * 4); // Index 1200
+
+    // Schleife über alle aktuell existierenden CPU-Einträge (maximal bis MAX_SLOTS)
+    for i in 0..self.slot_types.len() {
+        if i >= MAX_SLOTS { break; }
+
+        // 1. SKALARE & POSITIONS-SLOTS PACKEN (Stride 8)
+        let s_base = slots_offset + (i * 8);
+        packed_data[s_base]     = self.slot_types[i];      // [0] Typ
+        packed_data[s_base + 1] = self.slot_sizes[i];      // [1] Größe (Scale)
+        packed_data[s_base + 2] = self.slot_offsets_x[i];  // [2] Position X
+        packed_data[s_base + 3] = self.slot_offsets_y[i];  // [3] Position Y
+        packed_data[s_base + 4] = self.slot_offsets_z[i];  // [4] Position Z
+        packed_data[s_base + 5] = self.slot_r[i];          // [5] Farbe R
+        packed_data[s_base + 6] = self.slot_g[i];          // [6] Farbe G
+        packed_data[s_base + 7] = self.slot_b[i];          // [7] Farbe B
+
+        // 2. MATERIALIEN PACKEN (Stride 4)
+        let m_base = materials_offset + (i * 4);
+        packed_data[m_base]     = self.slot_roughness[i];
+        packed_data[m_base + 1] = self.slot_metallic[i];
+        packed_data[m_base + 2] = self.slot_emissive[i];
+        packed_data[m_base + 3] = self.slot_specular[i];
+
+        // 3. ROTATIONEN PACKEN (Stride 3)
+        let r_base = rotations_offset + (i * 3);
+        packed_data[r_base]     = *self.slot_rot_x.get(i).unwrap_or(&0.0f32);
+        packed_data[r_base + 1] = *self.slot_rot_y.get(i).unwrap_or(&0.0f32);
+        packed_data[r_base + 2] = *self.slot_rot_z.get(i).unwrap_or(&0.0f32);
     }
 
-
-    /// Rotations-Tensor: Erzeugt das flache Rotations-Register-Array
-    /// (100 Slots max * Stride 3 = 300 f32). Reihenfolge [rotX, rotY, rotZ] pro Slot.
-      /// Rotations-Tensor: Erzeugt das flache Rotations-Register-Array
-    /// (100 Slots max * Stride 3 = 300 f32). Reihenfolge [rotX, rotY, rotZ] pro Slot.
-    pub fn rotations_data(&self) -> Vec<f32> {
-        const MAX_SLOTS: usize = 100;
-        let mut dynamic_rotations = vec![0.0f32; MAX_SLOTS * 3];
-        for i in 0..self.slot_types.len() {
-            if i >= MAX_SLOTS { break; }
-            let base = i * 3;
-            
-            // Nutze .get(), um IndexOutOfBounds zu verhindern, falls die Arrays noch zu kurz sind
-            dynamic_rotations[base]     = *self.slot_rot_x.get(i).unwrap_or(&0.0f32);
-            dynamic_rotations[base + 1] = *self.slot_rot_y.get(i).unwrap_or(&0.0f32);
-            dynamic_rotations[base + 2] = *self.slot_rot_z.get(i).unwrap_or(&0.0f32);
-        }
-        dynamic_rotations
-    }
+    packed_data
+}
 
     /// Umwelt-Struct (ersetzt Tensor 4 / env_data()[16]): Licht, Farben, Nebel.
     /// fog_enabled als u32-Flag 0/1 (params3) statt f32.
