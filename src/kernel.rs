@@ -3,7 +3,9 @@
 use cubecl::frontend::CubeType;
 use cubecl::prelude::*;
 
-use cubecl::prelude::*;
+// Hole die Basis-Konstanten aus dem GPU-Modul
+use crate::gpu::{MAX_SLOTS, SLOTS_COUNT, MATERIALS_COUNT, ROTATIONS_COUNT};
+
 
 #[derive(Copy, Clone, CubeType)]
 #[cube(derive(Copy, Clone))]
@@ -755,18 +757,14 @@ pub fn raymarch_sdf_kernel(
 //
    // --- Konstanten für das automatische Slicing ---
       // --- Konstanten für das automatische Slicing (Jetzt sauber als usize) ---
-    const MAX_SLOTS: usize = 100;
-    
-    const SLOTS_SIZE: usize = MAX_SLOTS * 8;      // 800
-    const MATERIALS_SIZE: usize = MAX_SLOTS * 4;  // 400
-    const ROTATIONS_SIZE: usize = MAX_SLOTS * 3;  // 300
-
+  
+    // --- 🟢 KORRIGIERT: Nutzt jetzt die exakten Namen aus dem gpu-Import (_COUNT) ---
     const SLOTS_START: usize = 0;
-    const MATERIALS_START: usize = SLOTS_SIZE;                     // 800
-    const ROTATIONS_START: usize = MATERIALS_START + MATERIALS_SIZE; // 1200
-    const TOTAL_SIZE: usize = ROTATIONS_START + ROTATIONS_SIZE;    // 1500
+    const MATERIALS_START: usize = SLOTS_COUNT;                      // 800
+    const ROTATIONS_START: usize = SLOTS_COUNT + MATERIALS_COUNT;    // 1200
+    const TOTAL_SIZE: usize = ROTATIONS_START + ROTATIONS_COUNT;     // 1500
 
-    // 🟢 KORRIGIERT: Slices nutzen jetzt usize-Ranges, was CubeCL perfekt versteht
+    // Slices für die alten Funktionen herausschneiden
     let slots = &scene[SLOTS_START..MATERIALS_START];
     let materials = &scene[MATERIALS_START..ROTATIONS_START];
     let rotations = &scene[ROTATIONS_START..TOTAL_SIZE];

@@ -20,6 +20,24 @@ use cubecl_wgpu::{init_device, RuntimeOptions, WgpuRuntime, WgpuSetup};
 use cubecl_zspace::{Shape, Strides};
 use wgpui_kit::WgpuSurfaceHandle;
 
+// =========================================================================
+// 📐 GLOBALE GPU-PIPELINE KONSTANTEN (STRUCTURED BUFFER PACKING)
+// =========================================================================
+pub const MAX_SLOTS: usize = 100;
+
+// Element-Counts (Anzahl der f32-Werte)
+pub const SLOTS_COUNT: usize = MAX_SLOTS * 8;      // 800
+pub const MATERIALS_COUNT: usize = MAX_SLOTS * 4;  // 400
+pub const ROTATIONS_COUNT: usize = MAX_SLOTS * 3;  // 300
+pub const TOTAL_BUFFER_SIZE: usize = SLOTS_COUNT + MATERIALS_COUNT + ROTATIONS_COUNT; // 1500
+
+// Byte-Größen (1x f32 = 4 Bytes)
+pub const SLOTS_BYTES: usize = SLOTS_COUNT * 4;      // 3200 Bytes
+pub const MATERIALS_BYTES: usize = MATERIALS_COUNT * 4;  // 1600 Bytes
+pub const ROTATIONS_BYTES: usize = ROTATIONS_COUNT * 4;  // 1200 Bytes
+pub const TOTAL_SCENE_BYTES: usize = TOTAL_BUFFER_SIZE * 4; // 6000 Bytes
+// =========================================================================
+
 /// Auflösungs-Uniform für den Screen-Shader (fs_main).
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -51,9 +69,9 @@ const CUBE_DIM_Y: u32 = 4;
 /// Nur noch große dynamische Daten als Storage-Buffer (params1/params4):
 /// slots = 800 f32, materials = 400 f32, rotations = 300 f32.
 /// meta/env/arch/fold sind entfallen → CubeLaunch-Structs im Info-Uniform.
-const SLOTS_BYTES: usize = 800 * 4;
-const MATERIALS_BYTES: usize = 100 * 4 * 4;
-const ROTATIONS_BYTES: usize = 100 * 3 * 4; // 🟢 TENSOR 7: 100 Slots × Stride 3 (rotX, rotY, rotZ)
+//const SLOTS_BYTES: usize = 800 * 4;
+//const MATERIALS_BYTES: usize = 100 * 4 * 4;
+//const ROTATIONS_BYTES: usize = 100 * 3 * 4; // 🟢 TENSOR 7: 100 Slots × Stride 3 (rotX, rotY, rotZ)
 
 /// Alles, was der Render-Thread zum Zeichnen eines Frames braucht.
 pub struct GpuPipeline {
@@ -113,14 +131,6 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
         // --- Kernel-Register-Buffer ---
       // --- Kernel-Register-Buffer ---
 let output_handle = client.empty(output_byte_size(width, height));
-
-// 📐 1. Buffer-Größen exakt berechnen (basierend auf f32 = 4 Bytes)
-const MAX_SLOTS: usize = 100;
-const SLOTS_BYTES: usize = MAX_SLOTS * 8 * 4;      // 800 * 4 = 3200 Bytes
-const MATERIALS_BYTES: usize = MAX_SLOTS * 4 * 4;  // 400 * 4 = 1600 Bytes
-const ROTATIONS_BYTES: usize = MAX_SLOTS * 3 * 4;  // 300 * 4 = 1200 Bytes
-
-const TOTAL_SCENE_BYTES: usize = SLOTS_BYTES + MATERIALS_BYTES + ROTATIONS_BYTES; // 6000 Bytes
 
 // 📦 2. Nur noch EIN Handle allokieren
 let scene_handle = client.empty(TOTAL_SCENE_BYTES);
@@ -326,13 +336,7 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
         };
         // 2. 🟢 NEU: Erzeuge die BufferArgs direkt aus deinen Handles und den exakten Element-Längen
 // 2. 🟢 HIER GEHÖRT ES HIN: Die BufferArgs werden auf CPU-Ebene sicher zugewiesen
-const MAX_SLOTS: usize = 100;
 
-// 1. Berechne die genauen Element-Größen basierend auf MAX_SLOTS
-const SLOTS_COUNT: usize = MAX_SLOTS * 8;      // 100 * 8 = 800
-const MATERIALS_COUNT: usize = MAX_SLOTS * 4;  // 100 * 4 = 400
-const ROTATIONS_COUNT: usize = MAX_SLOTS * 3;  // 100 * 3 = 300
-const TOTAL_BUFFER_SIZE: usize = SLOTS_COUNT + MATERIALS_COUNT + ROTATIONS_COUNT; // 1500
 
 // 2. Erstellung des einzelnen BufferArg für CubeCL
 let scene_arg = unsafe {
