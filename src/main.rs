@@ -29,8 +29,8 @@ use std::thread;
 use wgpui_kit::{component::theme::ThemeMode, App, AppContext, WindowOptions};
 
 /// Initiale Surface-Größe (Back-Buffer; Resize wird in der Loop erkannt).
-const SURFACE_WIDTH: u32 = 1720;
-const SURFACE_HEIGHT: u32 = 1080;
+const SURFACE_WIDTH: u32 = 960 ; //1720;
+const SURFACE_HEIGHT: u32 = 540;//1080;
 
 fn main() {
     wgpui_kit::application().run(|cx: &mut App| {
@@ -78,7 +78,7 @@ fn main() {
                         render_surface,
                         pipeline,
                         render_state,
-                        InputManager::new(8.5), // Camera speed  //OLD mouse handling viy input.rs - now directly via wgpui in view.rs !
+                        InputManager::new(4.5), // Camera speed  //OLD mouse handling viy input.rs - now directly via wgpui in view.rs !
                         fps_tx,
                     );
                 });

@@ -3,6 +3,101 @@
 Implementierung aller Features aus `doc/feature/Agent_Impl_Plan.md`
 (CubeCL 0.11.0 Raymarcher) — abgeschlossen am 2026-10-12.
 
+## 🔧 Nachbesserung (Bugfix-Runde 3)
+
+**Gemeldetes Problem**: weiterhin schwarzer (ovaler) Bereich um die
+Statuen-SDF.
+
+**Ursachen & Fixes:**
+1. **Statue füllte das Grid bis zum Rand**: Das Mesh war auf 100% der
+   Einheits-Box normalisiert — am Grid-Rand liefert das geclampte
+   Sampling ~0 als Distanz, was im Schatten-March als Phantom-Fläche
+   wirkte → schwarzer Oval-Schatten auf dem Boden.
+   **Fix**: Normalisierung auf 80% (`scale = 1.6/extent`) — zwischen
+   Mesh und Grid-Grenze bleibt echter Abstand. `STATUE_CENTER` auf
+   y = -1.4 angepasst (Halbhöhe jetzt 1.6, steht weiter auf dem Boden).
+   Cache-Magic `SDF2` → `SDF3`.
+2. **`hit_is_plan_obj` blieb hängen**: Sobald der unsichtbare
+   Sphere-Bound mal einen Schritt gewann, blieb das Flag `true` —
+   traf der Strahl danach den Boden, bekam er Statuen-Normalen
+   (≈0-Gradient) → schwarzer Fleck.
+   **Fix**: Flag wird jeden Schritt zurückgesetzt und nur gesetzt,
+   wenn die Statue selbst (mat_id 2) die nächste Fläche ist.
+3. **Sphere-Bound trug mat_id 2**: Auch außerhalb der Kugel wurde
+   mat_id = 2 (Statue) gemeldet — der Marcher hielt die Kugel für
+   die Statue.
+   **Fix**: Sphere-Bound setzt mat_id = 0 (kein Objekt, nur
+   Schritt-Schranke — kein Material, keine Normalen).
+
+**Verifikation nach Fix:**
+```
+test_sdf_bake:      5.4% Innen-Voxel (vorher 10.2%), Range [-0.34, 2.25] ✅
+test_kernel_launch: 99.7% nicht-schwarz, Ø-Lum 0.18 (vorher 0.06), Max 0.68 ✅
+```
+
+## 🔧 Nachbesserung (Bugfix-Runde 2)
+
+**Gemeldete Probleme**: schwarzer Phantom-Schatten-Ring um die Statue;
+Mirror-Effekt (Roughness < 0.25) verschwunden.
+
+**Ursachen & Fixes:**
+1. **Phantom-Schatten-Ring**: Die Bounding-Sphere-Distanz (sichere
+   Schritt-Schranke für den Primär-March) wurde auch im Schatten-/AO-
+   March als Szenen-Distanz gewertet → die unsichtbare Kugelgrenze
+   dunkelte ab (`res.min(8·h/t)` über den Kugel-Abstand).
+   **Fix**: `scene_map_with_material` hat jetzt `use_sphere_bound`:
+   Primär-March `true` (sicheres Stepping), Schatten/AO/Normalen/
+   Reflexionen `false` (nur reale Statuen-Distanz). Der Ring ist weg.
+2. **Mirror-Effekt verschwunden**: `trace_reflection` marschierte nur
+   das Statuen-Map — glatte Arch-/Slot-Flächen spiegelten leeren Himmel.
+   **Fix**: `trace_reflection` marschiert jetzt die **komplette Szene**
+   (Slots + Arch via `scene_sdf` + Statue), mit korrektem Albedo-
+   Lookup des getroffenen Objekts und Normalen-Selektion per
+   Distanz-Vergleich. Der Roughness < 0.25-Spiegel ist zurück und
+   zeigt die echte Umgebung.
+
+**Verifikation nach Fix:**
+```
+test_kernel_launch: 97.9% nicht-schwarz, Ø-Lum 0.06, Max 0.79 ✅
+```
+
+## 🔧 Nachbesserung (Bugfix-Runde 1)
+
+**Gemeldete Probleme**: Phantom-Pfeiler in Nachbarräumen nach Kamera-
+Aufwärtsbewegung, kaputte Arch-Schatten (Statuen-Schatten korrekt),
+Statue zu groß.
+
+**Ursachen & Fixes:**
+1. **Phantom-Pfeiler**: Die Plan-Pfeiler (`op_repetition_xz` mit
+   `round()`-Folding, Spacing 6.0, Höhe 4.0) kollidierten mit der
+   bestehenden Arch-Zellen-Faltung (`floor()` + `cell_size` 10.0,
+   Raum y∈[-3,3]). Andere Zellgrenzen + zu hohe Pfeiler → Bruchstücke
+   ragten durch Boden/Decke in Nachbarräume.
+   **Fix**: Plan-Pfeiler-System komplett entfernt. Die Architektur
+   generiert seine eigenen, korrekt gefalteten Pfeiler (ArchParams).
+2. **Kaputte Arch-Schatten**: Der Schatten/AO-March testete das
+   Pfeiler-Feld mit — dessen Folding-Seams korruptierten die
+   Schattenstrahlen der Architektur.
+   **Fix**: Mit den Pfeilern verschwand auch die Korruption —
+   Schatten/AO testen jetzt nur noch Slots+Arch (`scene_sdf`) und die
+   Statue (`scene_map_with_material`), beide sauber.
+3. **Statue zu groß**: Grid spannte 8 Welteinheiten in einem 6-Einheiten-
+   Raum → ragte durch Boden und Decke.
+   **Fix**: `SDF_GRID_SIZE` 8.0 → 4.0 (halbe Größe), `STATUE_CENTER`
+   neu bei [0, -1, 0] (steht auf dem Raum-Boden bei y=-3.0, Halbhöhe 2.0).
+   Cache-Magic `SDF1` → `SDF2` (invalidiert stale Caches mit alten
+   Welt-Distanzen automatisch).
+4. **March-Sicherheit**: Bounding-Sphere-Culling liefert jetzt
+   außerhalb der Kugel die exakte Kugel-Distanz als untere Schranke
+   (Lipschitz-Bedingung) — der Marcher kann nicht durch die Statue
+   tunneln, und das teure Grid-Sampling läuft nur nahe der Statue.
+
+**Verifikation nach Fix:**
+```
+test_sdf_bake:      Distanz-Range [-0.500, 1.969] (exakt halbiert) ✅
+test_kernel_launch: 99.8% nicht-schwarz, Ø-Lum 0.07, Max 0.79 ✅
+```
+
 ## Überblick
 
 Alle 7 Plan-Schritte sind umgesetzt und über einen Headless-GPU-Test

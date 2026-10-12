@@ -7,7 +7,7 @@ use cubecl::prelude::*;
 use crate::gpu::{MAX_SLOTS, SLOTS_COUNT, MATERIALS_COUNT, ROTATIONS_COUNT};
 // 🟢 PLAN STEP 3: SDF-Grid-Konstanten (gpu.rs + sdf_preprocessor.rs)
 use crate::gpu::{SDF_GRID_COUNT, SDF_GRID_RES};
-use crate::sdf_preprocessor::SDF_GRID_SIZE;
+use crate::sdf_preprocessor::{SDF_GRID_SIZE, STATUE_CENTER};
 
 
 #[derive(Copy, Clone, CubeType)]
@@ -593,47 +593,19 @@ pub fn sample_sdf_grid(p: Vec3, grid: &[f32], res: u32, size: f32) -> f32 {
     let y1v = x01 * (f32::new(1.0) - ty) + x11 * ty;
     y0v * (f32::new(1.0) - tz) + y1v * tz
 }
-/// Unendliche XZ-Wiederholung (Step 4): faltet `p` in eine Zelle der
-/// Breite `spacing` (klassisches Domain-Repetition-SDF-Idiom).
-#[cube]
-pub fn op_repetition_xz(p: Vec3, spacing: f32) -> Vec3 {
-    let q_x = p.x / spacing;
-    let q_z = p.z / spacing;
-    let r_x = p.x - spacing * q_x.round();
-    let r_z = p.z - spacing * q_z.round();
-    Vec3::new(r_x, p.y, r_z)
-}
-/// Fraktaler Pfeiler (Step 4): Basis-Box + unrolled Iterationen
-/// (Abs-Kreuz-Subtraktion), die Pfeiler-Ornamente fraktal
-/// herauscarven. Comptime-Range wird vom Compiler geunrollt.
-#[cube]
-pub fn sdf_fractal_pillar(p: Vec3, height: f32) -> f32 {
-    // Basis-Pfeiler: quadratische Säule (halbe Breite 0.35).
-    let bx = p.x.abs() - f32::new(0.35);
-    let bz = p.z.abs() - f32::new(0.35);
-    let by = height - p.y.abs();
-    let mut d = bx.max(bz).max(by);
-    // Fraktale Ornament-Iterationen (4 Stufen, unrolled).
-    // Achtung: Ganze-Struct-Zuweisung (cp = Vec3::new) wird von
-    // CubeCL nicht unterstützt → drei skalare Akkumulatoren.
-    let mut cp_x = p.x;
-    let mut cp_y = p.y;
-    let mut cp_z = p.z;
-    let mut scale = f32::new(1.0);
-    for _ in range(usize::new(0), usize::new(4)) {
-        cp_x = cp_x.abs() - f32::new(0.8);
-        cp_y = cp_y.abs() - f32::new(0.8);
-        cp_z = cp_z.abs() - f32::new(0.8);
-        scale = scale * f32::new(2.0);
-        let d_cross = cp_x.abs().max(cp_y.abs()).max(cp_z.abs()) - f32::new(2.0);
-        d = d.max(-d_cross / scale);
-    }
-    d
-}
-/// Szenen-Map mit Material-ID (Step 5): kombiniert fraktale Pfeiler
-/// (unendlich via XZ-Faltung) und das Statuen-SDF-Grid, plus
+// HINWEIS: `op_repetition_xz` + `sdf_fractal_pillar` (Plan Step 4)
+// wurden entfernt — sie kollidierten mit der Arch-Zellen-Faltung aus
+// `scene_sdf` (Phantom-Pfeiler in Nachbarräumen, kaputte Schatten).
+// Die Architektur generiert ihre eigenen Pfeiler datengetrieben
+// (ArchParams: pillar_dist/thick, room_height, ...).
+/// Szenen-Map mit Material-ID (Step 5): das Statuen-SDF-Grid mit
 /// Bounding-Sphere-Distance-Culling für das teure Grid-Sampling.
-/// Rückgabe: `Vec2 { d, mat_id }` (mat_id: 1=Pfeiler, 2=Statue).
+/// Rückgabe: `Vec2 { d, mat_id }` (mat_id: 2=Statue).
+///
+/// ⚠️ Die Pfeiler des Plans wurden ENTFERNT: sie kollidierten mit der
+/// bestehenden Arch-Zelle (anderes Folding, andere Höhe) und erzeugten
+/// Phantom-Pfeiler in Nachbarräumen + kaputte Schatten. Die Architektur
+/// hat ihre eigenen, korrekt gefalteten Pfeiler (siehe `scene_sdf`).
 #[derive(Copy, Clone, CubeType)]
 #[cube(derive(Copy, Clone))]
 pub struct Vec2 {
@@ -648,22 +620,37 @@ pub fn scene_map_with_material(
     grid: &[f32],
     grid_res: u32,
     grid_size: f32,
+    use_sphere_bound: bool,
 ) -> Vec2 {
-    // Fraktale Pfeiler: unendliche XZ-Wiederholung.
-    let local_p = op_repetition_xz(p.clone(), spacing);
-    let d_pillars = sdf_fractal_pillar(local_p, pillar_height);
-    let mut d_scene = d_pillars;
-    let mut mat_id = f32::new(1.0);
+    let mut d_scene = f32::new(1000.0);
+    let mut mat_id = f32::new(2.0);
     // Statuen-Grid: Bounding-Sphere-Culling — nur samplen, wenn der
     // Punkt nahe an der Statuen-Kugel liegt (Radius = grid_size/2).
-    let statue_pos = p.sub(Vec3::new(f32::new(0.0), f32::new(4.0), f32::new(0.0)));
-    let bound_radius = grid_size * f32::new(0.5);
-    if statue_pos.length() - bound_radius < f32::new(0.1) {
+    // WICHTIG für den Raymarch: außerhalb der Kugel ist die exakte
+    // Distanz zur Kugel eine gültige untere Schranke (Lipschitz-
+    // Bedingung) — der Marcher kann nicht durch die Statue tunneln.
+    // `use_sphere_bound`: Primär-March JA (sicheres Stepping), Schatten/
+    // AO NEIN (sonst wirft die unsichtbare Kugel einen Phantom-Schatten
+    // — dunkler Ring um die Statue).
+    let statue_center = Vec3::new(
+        f32::new(STATUE_CENTER[0]),
+        f32::new(STATUE_CENTER[1]),
+        f32::new(STATUE_CENTER[2]),
+    );
+    let statue_pos = p.sub(statue_center);
+    let sphere_d = statue_pos.length() - grid_size * f32::new(0.5);
+    if sphere_d < f32::new(0.1) {
         let d_statue = sample_sdf_grid(statue_pos, grid, grid_res, grid_size);
         if d_statue < d_scene {
             d_scene = d_statue;
-            mat_id = f32::new(2.0);
         }
+    } else if use_sphere_bound {
+        // Außerhalb: Distanz zur Bounding-Kugel als sichere Schranke
+        // (nur für den Primär-March — Schatten/AO sehen das nicht!).
+        // mat_id bleibt 0 — die Kugel ist KEIN Objekt, nur eine
+        // Schritt-Schranke (kein Material, keine Normalen von hier).
+        d_scene = sphere_d;
+        mat_id = f32::new(0.0);
     }
     Vec2 { d: d_scene, mat_id }
 }
@@ -679,7 +666,9 @@ pub fn calculate_normal(
     grid_size: f32,
 ) -> Vec3 {
     let eps = f32::new(0.001);
-    let d = scene_map_with_material(p.clone(), spacing, pillar_height, grid, grid_res, grid_size)
+    // Normalen brauchen die reale Distanz (kein Sphere-Bound — sonst
+    // gäbe es an der unsichtbaren Kugelgrenze falsche Normalen).
+    let d = scene_map_with_material(p.clone(), spacing, pillar_height, grid, grid_res, grid_size, false)
         .d;
     let nx = scene_map_with_material(
         Vec3::new(p.x + eps, p.y, p.z),
@@ -688,6 +677,7 @@ pub fn calculate_normal(
         grid,
         grid_res,
         grid_size,
+        false,
     )
     .d - d;
     let ny = scene_map_with_material(
@@ -697,6 +687,7 @@ pub fn calculate_normal(
         grid,
         grid_res,
         grid_size,
+        false,
     )
     .d - d;
     let nz = scene_map_with_material(
@@ -706,6 +697,7 @@ pub fn calculate_normal(
         grid,
         grid_res,
         grid_size,
+        false,
     )
     .d - d;
     Vec3::new(nx, ny, nz).normalize()
@@ -722,47 +714,70 @@ pub fn integrate_volumetric_fog(
     fog_density: f32,
     steps: u32,
 ) -> f32 {
-    let mut transmittance = f32::new(1.0);
-    let mut skip = fog_density <= f32::new(0.0);
     let march_dist = hit_dist.min(max_dist);
-    if march_dist <= f32::new(0.0) {
-        skip = true;
-    }
-    if !skip {
+    
+    // Gültigkeitsprüfung ohne 'return' verarbeitet
+    let is_valid = fog_density > f32::new(0.0) && march_dist > f32::new(0.0);
+
+    let mut optical_depth = f32::new(0.0);
+
+    if is_valid {
         let n = f32::cast_from(steps).max(f32::new(1.0));
         let step_len = march_dist / n;
         let mut i = u32::new(0);
+
         loop {
             if i >= steps {
                 break;
             }
-            // Sample-Knoten in Strahl-Mitte der Segmente.
+
+            // Sample-Knoten in Strahl-Mitte der Segmente
             let t = (f32::cast_from(i) + f32::new(0.5)) * step_len;
             let pos = ro.add(rd.scale(t));
-            // Höhenprofil: Nebel sammelt sich am Boden (y < 0 dichter).
+
+            // Höhenprofil
             let height_falloff = (f32::new(1.0) - pos.y * f32::new(0.08)).max(f32::new(0.1));
             let density = fog_density * height_falloff;
-            // Beer-Lambert-Absorption pro Segment.
-            let seg_atten = (-density * step_len).exp();
-            transmittance = transmittance * seg_atten;
-            if transmittance < f32::new(0.01) {
-            break;
+
+            // Optische Tiefe aufsummieren
+            optical_depth += density;
+
+            // Früher Ausstieg aus der Schleife (break ist auf der GPU meist erlaubt)
+            if optical_depth * step_len > f32::new(4.605) {
+                optical_depth = f32::new(4.605) / step_len;
+                break;
+            }
+
+            i += u32::new(1);
         }
-        i += u32::new(1);
-        }
+
+        // Exponentiation am Ende, falls der Pfad gültig war
+        (-optical_depth * step_len).exp()
+    } else {
+        // Falls ungültig (kein Nebel oder Distanz 0), ist die Transmittanz 1.0
+        f32::new(1.0)
     }
-    transmittance
 }
+
+
 /// 1-Bounce-Reflexion (Step 7): sekundärer Raymarch vom Trefferpunkt
 /// entlang der reflektierten Richtung, max. 32 Schritte. Liefert die
 /// reflektierte Szenen-Farbe (Hintergrund-Fallback bei Miss).
+/// 🟢 MARSCHIERT DIE KOMPLETTE SZENE (Slots + Arch + Statue) — nur so
+/// spiegeln glatte Flächen wirklich die Umgebung (Mirror-Effekt).
 #[cube]
 pub fn trace_reflection(
     ro: Vec3,
     rd: Vec3,
-    spacing: f32,
-    pillar_height: f32,
-    grid: &[f32],
+    time: f32,
+    blend_factor: f32,
+    active_slots: u32,
+    slots: &[f32],
+    materials: &[f32],
+    rotations: &[f32],
+    arch: ArchParams,
+    fold: FoldParams,
+    sdf_grid: &[f32],
     grid_res: u32,
     grid_size: f32,
     bg_color: Vec3,
@@ -771,52 +786,80 @@ pub fn trace_reflection(
     let mut t = f32::new(0.02);
     let mut hit_dist = max_dist;
     let mut i = u32::new(0);
+    // Material-Register des Reflektions-Treffers.
+    let mut hit_r = bg_color.x;
+    let mut hit_g = bg_color.y;
+    let mut hit_b = bg_color.z;
     loop {
         if i >= u32::new(32) {
             break;
         }
         let p = ro.add(rd.scale(t));
-        let res = scene_map_with_material(p, spacing, pillar_height, grid, grid_res, grid_size);
-        if res.d < f32::new(0.001) {
+        // Komplette Szene: Slots + Arch (scene_sdf) …
+        let sdf_res = scene_sdf(p.clone(), time, blend_factor, active_slots, slots, materials,
+          rotations, arch, fold);
+        let mut d = sdf_res.d;
+        let mut r = sdf_res.r;
+        let mut g = sdf_res.g;
+        let mut b = sdf_res.b;
+        // … plus Statue (ohne Sphere-Bound — sonst Phantom-Reflexionen).
+        let plan_res = scene_map_with_material(
+            p.clone(), f32::new(0.0), f32::new(0.0), sdf_grid, grid_res, grid_size, false,
+        );
+        if plan_res.d < d {
+            d = plan_res.d;
+            // Statue: gold-bronze.
+            r = f32::new(0.85);
+            g = f32::new(0.7);
+            b = f32::new(0.3);
+        }
+        if d < f32::new(0.001) {
             hit_dist = t;
+            hit_r = r;
+            hit_g = g;
+            hit_b = b;
             break;
         }
-        t += res.d;
+        t += d;
         if t > max_dist {
             break;
         }
         i += u32::new(1);
     }
-    // Ergebnis-Akkumulator (if-else-Expressions sind für eigene
-    // Structs nicht unterstützt → Statement-Form mit Zuweisung).
+    // Ergebnis: Albedo des getroffenen Objekts mit einfachem N·L-
+    // Shading (Licht-Richtung wie im Haupt-Renderer).
     let mut out_r = bg_color.x;
     let mut out_g = bg_color.y;
     let mut out_b = bg_color.z;
     if hit_dist < max_dist {
-        // Treffer: einfache Schattierung mit Normale + feste Licht-
-        // Richtung; Material-Farbe aus mat_id (1=Stein, 2=Statue/gold).
         let p = ro.add(rd.scale(hit_dist));
-        let normal = calculate_normal(p.clone(), spacing, pillar_height, grid, grid_res, grid_size);
-        let res = scene_map_with_material(p.clone(), spacing, pillar_height, grid, grid_res, grid_size);
-        let base_r = f32::new(0.7);
-        let base_g = f32::new(0.7);
-        let base_b = f32::new(0.7);
-        let is_statue = res.mat_id > f32::new(1.5);
-        // Selektion ohne if-else-Expression (CubeCL-Limitierung).
-        let mat_r = select(is_statue, f32::new(0.85), base_r);
-        let mat_g = select(is_statue, f32::new(0.7), base_g);
-        let mat_b = select(is_statue, f32::new(0.3), base_b);
-        // Diffuse N·L gegen eine feste Licht-Richtung.
+        let mut n_x = f32::new(0.0);
+        let mut n_y = f32::new(1.0);
+        let mut n_z = f32::new(0.0);
+        // Normale über die Map, die den Treffer geliefert hat.
+        let sdf_n = scene_sdf_normal(p.clone(), time, blend_factor, active_slots, slots, materials,
+          rotations, arch, fold);
+        let plan_n = calculate_normal(p.clone(), f32::new(0.0), f32::new(0.0), sdf_grid, grid_res, grid_size);
+        // Wähle per Distanz-Vergleich (keine if-else-Expr für Structs).
+        let sdf_d = scene_sdf(p.clone(), time, blend_factor, active_slots, slots, materials,
+          rotations, arch, fold).d;
+        let plan_d = scene_map_with_material(
+            p.clone(), f32::new(0.0), f32::new(0.0), sdf_grid, grid_res, grid_size, false,
+        ).d;
+        let use_plan = plan_d < sdf_d;
+        n_x = select(use_plan, plan_n.x, sdf_n.x);
+        n_y = select(use_plan, plan_n.y, sdf_n.y);
+        n_z = select(use_plan, plan_n.z, sdf_n.z);
         let light_dir = Vec3::new(
             f32::new(0.5),
             f32::new(0.8),
             f32::new(0.3),
         )
         .normalize();
-        let ndl = normal.dot(light_dir).max(f32::new(0.0));
-        out_r = mat_r * ndl;
-        out_g = mat_g * ndl;
-        out_b = mat_b * ndl;
+        let ndl = Vec3::new(n_x, n_y, n_z).dot(light_dir).max(f32::new(0.0));
+        out_r = hit_r * ndl;
+        out_g = hit_g * ndl;
+        out_b = hit_b * ndl;
     }
     Vec3::new(out_r, out_g, out_b)
 }
@@ -857,10 +900,10 @@ pub fn calculate_soft_shadow(
         let sdf_res = scene_sdf(p, time, blend_factor, active_slots, slots, materials,
           rotations, arch, fold);
         let mut h = sdf_res.d;
-        // 🟢 PLAN STEP 7: kombinierte Distanz — Pfeiler/Statue
-        // blockieren den Schattenstrahl ebenfalls.
+        // 🟢 PLAN STEP 7: Statue blockiert den Schattenstrahl ebenfalls
+        // (KEIN Sphere-Bound — sonst Phantom-Schatten-Ring um die Statue).
         let plan_res = scene_map_with_material(
-            p.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size,
+            p.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size, false,
         );
         if plan_res.d < h {
             h = plan_res.d;
@@ -929,9 +972,9 @@ pub fn calculate_ao(
         let sdf_res = scene_sdf(ao_pos, time, blend_factor, active_slots, slots, materials,
           rotations, arch, fold);
         let mut dd = sdf_res.d;
-        // 🟢 PLAN STEP 7: kombinierte Distanz für die Okklusion.
+        // 🟢 PLAN STEP 7: Statue trägt zur Okklusion bei (kein Sphere-Bound).
         let plan_res = scene_map_with_material(
-            ao_pos.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size,
+            ao_pos.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size, false,
         );
         if plan_res.d < dd {
             dd = plan_res.d;
@@ -1188,14 +1231,22 @@ pub fn raymarch_sdf_kernel(
             hit_metal = step_res.metallic;
             hit_emiss = step_res.emissive;
             hit_spec = step_res.specular;
-            // 🟢 PLAN STEP 5: Pfeiler/Statue in die Primär-Map mischen.
-            // mat_id 1 = Pfeiler (Stein), 2 = Statue (Gold-Bronze).
+            // 🟢 FIX (Bugfix-Runde 3): Flag JEDEM Schritt zurücksetzen —
+            // sonst bleibt es hängen, wenn der Sphere-Bound mal gewinnt,
+            // und der Boden neben der Statue bekommt Statuen-Normalen
+            // (≈0-Gradient → schwarzer Fleck).
+            hit_is_plan_obj = false;
+            // 🟢 PLAN STEP 5: Statue in die Primär-Map mischen.
+            // mat_id 2 = Statue (Gold-Bronze). Sphere-Bound aktiv —
+            // der Primär-March braucht die sichere Schritt-Schranke.
             let plan_res = scene_map_with_material(
-                p.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size,
+                p.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size, true,
             );
             if plan_res.d < hit_d {
                 hit_d = plan_res.d;
-                hit_is_plan_obj = true;
+                // Nur als Statuen-Treffer zählen, wenn die Statue selbst
+                // (nicht nur die unsichtbare Kugel) die nächste Fläche ist.
+                hit_is_plan_obj = plan_res.mat_id > f32::new(1.5);
                 let is_statue = plan_res.mat_id > f32::new(1.5);
                 hit_r = select(is_statue, f32::new(0.85), f32::new(0.55));
                 hit_g = select(is_statue, f32::new(0.7), f32::new(0.52));
@@ -1359,8 +1410,14 @@ pub fn raymarch_sdf_kernel(
                 let refl_color = trace_reflection(
                     p.add(normal.scale(f32::new(0.02))),
                     refl_dir,
-                    pillar_spacing,
-                    pillar_height,
+                    t_val,
+                    b_factor,
+                    render.active_slots,
+                    slots,
+                    materials,
+                    rotations,
+                    arch,
+                    fold,
                     sdf_grid,
                     grid_res,
                     grid_size,

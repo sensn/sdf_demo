@@ -14,7 +14,14 @@ use std::path::Path;
 /// Kernel (`sample_sdf_grid`) und dem Cache-Header übereinstimmen.
 pub const SDF_GRID_RES: usize = 64;
 /// Welt-Ausdehnung des Grids (Würfel-Kantenlänge, zentriert am Ursprung).
-pub const SDF_GRID_SIZE: f32 = 8.0;
+/// 🟢 Auf HALBE Größe geschrumpft (war 8.0): die Statue füllte sonst
+/// den kompletten 6-Einheiten-Raum und ragte durch Boden + Decke.
+pub const SDF_GRID_SIZE: f32 = 4.0;
+/// Welt-Position des Statuen-Zentrums. Der Raum-Boden liegt bei
+/// y = -room_height = -3.0. Die Statue ist auf 80% des Grids
+/// normalisiert (Halbhöhe = 0.8 × SDF_GRID_SIZE/2 = 1.6) und steht
+/// auf dem Boden: Zentrum bei y = -3.0 + 1.6 = -1.4.
+pub const STATUE_CENTER: [f32; 3] = [0.0, -1.4, 0.0];
 
 /// Lädt ein OBJ-File und bäckt es in ein 3D-SDF-Grid.
 ///
@@ -73,7 +80,13 @@ pub fn load_obj_to_sdf(file_path: &str, resolution: usize) -> Vec<f32> {
         .max(max[1] - min[1])
         .max(max[2] - min[2])
         .max(1e-6);
-    let scale = 2.0 / extent;
+    // 🟢 FIX (Bugfix-Runde 3): Mesh nur auf 80% der Einheits-Box
+    // normalisieren (statt 100%). Grund: die Statue füllte das Grid
+    // bis zum Rand — am Rand liefert das geclampte Sampling ~0 als
+    // Distanz, was im Schatten-March als Phantom-Fläche wirkte
+    // (schwarzer Oval-Schatten auf dem Boden um die Statue).
+    // Mit Rand bleibt zwischen Mesh und Grid-Grenze echter Abstand.
+    let scale = 1.6 / extent; // 80% von [-1,1]
     for v in vertices.iter_mut() {
         for c in 0..3 {
             v[c] = (v[c] - center[c]) * scale;
@@ -122,7 +135,7 @@ pub fn save_sdf_cache(path: &str, data: &[f32]) -> std::io::Result<()> {
     let file = std::fs::File::create(path)?;
     let mut w = BufWriter::new(file);
     use std::io::Write;
-    w.write_all(b"SDF1")?;
+    w.write_all(b"SDF3")?;
     w.write_all(&(data.len() as u32).to_le_bytes())?;
     let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
     w.write_all(&bytes)?;
@@ -138,10 +151,10 @@ pub fn load_sdf_cache(path: &str, size: usize) -> std::io::Result<Vec<f32>> {
     use std::io::Read;
     let mut magic = [0u8; 4];
     r.read_exact(&mut magic)?;
-    if &magic != b"SDF1" {
+    if &magic != b"SDF3" {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "SDF cache: bad magic",
+            "SDF cache: bad magic (erwartet SDF3 — Cache evtl. aus alter Bake)",
         ));
     }
     let mut len_bytes = [0u8; 4];
