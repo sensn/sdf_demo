@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["format_debug","format_str","type_name_sanitized","type_name_short_sanitized"],"struct":["DebugRaw"]};

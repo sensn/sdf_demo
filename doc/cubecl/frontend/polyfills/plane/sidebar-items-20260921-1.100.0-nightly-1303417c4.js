@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["plane_reduce","plane_reduce_exclusive","plane_reduce_inclusive"],"mod":["plane_reduce","plane_reduce_exclusive","plane_reduce_inclusive"],"struct":["OpAdd","OpMax","OpMin","OpMul"],"trait":["PlaneOp"]};

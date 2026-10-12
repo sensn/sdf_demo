@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["RecorderEvent"],"struct":["DummyListener","Recorder"],"trait":["InsertionListener","RewriteListener"]};

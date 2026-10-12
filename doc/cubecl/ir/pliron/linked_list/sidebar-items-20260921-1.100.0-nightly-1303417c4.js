@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["append_linked_list"],"struct":["Iter"],"trait":["ContainsLinkedList","LinkedList"]};

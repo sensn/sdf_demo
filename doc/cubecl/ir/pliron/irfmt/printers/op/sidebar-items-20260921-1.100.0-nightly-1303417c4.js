@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["region","symb_op_header","typed_symb_op_header"]};

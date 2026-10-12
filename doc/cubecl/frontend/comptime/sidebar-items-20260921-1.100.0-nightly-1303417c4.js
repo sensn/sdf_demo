@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["device_properties","hardware_properties"],"mod":["device_properties","hardware_properties"]};

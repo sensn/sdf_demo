@@ -30,12 +30,18 @@ pub const SLOTS_COUNT: usize = MAX_SLOTS * 8;      // 800
 pub const MATERIALS_COUNT: usize = MAX_SLOTS * 4;  // 400
 pub const ROTATIONS_COUNT: usize = MAX_SLOTS * 3;  // 300
 pub const TOTAL_BUFFER_SIZE: usize = SLOTS_COUNT + MATERIALS_COUNT + ROTATIONS_COUNT; // 1500
+// 🟢 PLAN STEP 2/3: SDF-Statuen-Grid (64³ Voxel) wird an den
+// Mega-Scene-Buffer angehängt. Layout: [slots|materials|rotations|sdf_grid].
+pub const SDF_GRID_RES: usize = crate::sdf_preprocessor::SDF_GRID_RES; // 64
+pub const SDF_GRID_COUNT: usize = SDF_GRID_RES * SDF_GRID_RES * SDF_GRID_RES; // 262144
+pub const SDF_GRID_START: usize = TOTAL_BUFFER_SIZE; // 1500
+pub const TOTAL_SCENE_FLOATS: usize = TOTAL_BUFFER_SIZE + SDF_GRID_COUNT; // 263644
 
 // Byte-Größen (1x f32 = 4 Bytes)
 pub const SLOTS_BYTES: usize = SLOTS_COUNT * 4;      // 3200 Bytes
 pub const MATERIALS_BYTES: usize = MATERIALS_COUNT * 4;  // 1600 Bytes
 pub const ROTATIONS_BYTES: usize = ROTATIONS_COUNT * 4;  // 1200 Bytes
-pub const TOTAL_SCENE_BYTES: usize = TOTAL_BUFFER_SIZE * 4; // 6000 Bytes
+pub const TOTAL_SCENE_BYTES: usize = TOTAL_SCENE_FLOATS * 4; // ~1.05 MB
 // =========================================================================
 
 /// Auflösungs-Uniform für den Screen-Shader (fs_main).
@@ -234,6 +240,138 @@ let scene_handle = client.empty(TOTAL_SCENE_BYTES);
         Ok(pipeline)
     }
 
+    /// 🟢 Headless-Konstruktor (Tests/CI): gleiche Pipeline, aber ohne
+    /// wgpui-Surface — Adapter/Device/Queue kommen vom Caller. Der
+    /// CubeCL-Teil (Kernel-Compile + Launch) läuft identisch.
+    pub fn new_headless(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, GpuInitError> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN,
+            flags: wgpu::InstanceFlags::empty(),
+            backend_options: wgpu::BackendOptions::default(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            display: None,
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+            apply_limit_buckets: false,
+        }))
+        .map_err(|_| GpuInitError::NoAdapter)?;
+        let wgpu_setup = WgpuSetup {
+            instance,
+            adapter,
+            device: device.clone(),
+            queue: queue.clone(),
+            backend: wgpu::Backend::Vulkan,
+        };
+        let cubecl_device_id = init_device(wgpu_setup, RuntimeOptions::default());
+        let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cubecl_device_id);
+        let output_handle = client.empty(output_byte_size(width, height));
+        let scene_handle = client.empty(TOTAL_SCENE_BYTES);
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Screen Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+        });
+        let resolution = ResolutionUniform {
+            width,
+            height,
+            _padding: [0; 2],
+        };
+        use wgpu::util::DeviceExt;
+        let resolution_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Resolution Uniform"),
+                contents: bytemuck::cast_slice(&[resolution]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Screen Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Screen Pipeline Layout"),
+                bind_group_layouts: &[Some(&bind_group_layout)],
+                immediate_size: 0,
+            });
+        let render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Screen Render Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+        let mut pipeline = Self {
+            client,
+            device: device.clone(),
+            queue: queue.clone(),
+            render_pipeline,
+            bind_group_layout,
+            resolution_buffer,
+            resolution,
+            output_handle,
+            scene_handle,
+            bind_group: None,
+        };
+        pipeline.rebuild_bind_group();
+        Ok(pipeline)
+    }
+
     /// Baut die BindGroup neu (nötig, wenn `output_handle` ersetzt wurde).
     fn rebuild_bind_group(&mut self) {
         // Ergänzen Sie die Turbofish-Syntax mit dem WgpuServer-Typen:
@@ -310,14 +448,10 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
     /// Ein kompletter Frame: Raymarch-Kernel-Launch + Blit auf den
     /// Back-Buffer. `time`/`dt` in Sekunden.
     #[allow(clippy::too_many_arguments)]
-    pub fn render_frame(
-        &mut self,
-        view: &wgpu::TextureView,
-        dw: u32,
-        dh: u32,
-        s: &ApplicationState,
-        time: f32,
-    ) {
+    /// 🟢 Headless-fähiger Kernel-Launch: kompiliert den CubeCL-Kernel
+    /// (WGSL-Codegen) und startet den Compute-Pass. Getrennt vom Blit,
+    /// damit Tests den Kernel ohne Surface treiben können.
+    pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: f32) {
         let total_pixels = (dw * dh) as usize;
         let cube_count = cubecl::CubeCount::Static(
             dw.div_ceil(CUBE_DIM_X),
@@ -325,7 +459,6 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
             1,
         );
         let cube_dim = cubecl::CubeDim::new_3d(CUBE_DIM_X, CUBE_DIM_Y, 1);
-
         // --- Kernel-Args (unsafe: Handles sind korrekt sized, Strides/Shape 1D) ---
         let output_arg = unsafe {
             TensorArg::from_raw_parts(
@@ -335,50 +468,10 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
             )
         };
         // 2. 🟢 NEU: Erzeuge die BufferArgs direkt aus deinen Handles und den exakten Element-Längen
-// 2. 🟢 HIER GEHÖRT ES HIN: Die BufferArgs werden auf CPU-Ebene sicher zugewiesen
-
-
-// 2. Erstellung des einzelnen BufferArg für CubeCL
-let scene_arg = unsafe {
-    cubecl::prelude::BufferArg::from_raw_parts(self.scene_handle.clone(), TOTAL_BUFFER_SIZE)
-};
-
-/*
-let (slots_arg, materials_arg, rotations_arg) = unsafe {
-    (
-        cubecl::prelude::BufferArg::from_raw_parts(self.slots_handle.clone(), 800),
-        cubecl::prelude::BufferArg::from_raw_parts(self.materials_handle.clone(), 400),
-        cubecl::prelude::BufferArg::from_raw_parts(self.rotations_handle.clone(), 300),
-    )
-};
-
-*/
-/*
-        let slots_arg = unsafe {
-            TensorArg::from_raw_parts(
-                self.slots_handle.clone(),
-                Strides::from(&[1usize]),
-                Shape::from(&[800usize]),
-            )
+        // 2. Erstellung des einzelnen BufferArg für CubeCL
+        let scene_arg = unsafe {
+            cubecl::prelude::BufferArg::from_raw_parts(self.scene_handle.clone(), TOTAL_SCENE_FLOATS)
         };
-        let materials_arg = unsafe {
-            TensorArg::from_raw_parts(
-                self.materials_handle.clone(),
-                Strides::from(&[1usize]),
-                Shape::from(&[400usize]),  //was 100
-            )
-        };
-        let rotations_arg = unsafe {
-            TensorArg::from_raw_parts(
-                self.rotations_handle.clone(),
-                Strides::from(&[1usize]),
-                Shape::from(&[300usize]), // 🟢 TENSOR 7: 100 Slots × Stride 3
-            )
-        };
-
-*/
-
-
         crate::kernel::raymarch_sdf_kernel::launch(
             &self.client,
             cube_count,
@@ -391,7 +484,17 @@ let (slots_arg, materials_arg, rotations_arg) = unsafe {
             s.fold_launch(),
             s.render_launch(time, dw, dh),
         );
+    }
 
+    pub fn render_frame(
+        &mut self,
+        view: &wgpu::TextureView,
+        dw: u32,
+        dh: u32,
+        s: &ApplicationState,
+        time: f32,
+    ) {
+        self.launch_kernel(dw, dh, s, time);
         // --- Blit: Raymarch-Buffer → Surface-Back-Buffer ---
         let mut encoder = self
             .device

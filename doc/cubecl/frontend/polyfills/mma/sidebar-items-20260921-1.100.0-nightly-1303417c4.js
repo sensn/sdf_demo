@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["col_index","row_index"],"mod":["col_index","row_index"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ListSeparator","RegionPrintDepthLimit"],"fn":["fmt_indented_newline","fmt_iter","indented_nl"],"struct":["State"],"trait":["Printable"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["ravel_index","wrap_index"],"struct":["IndexWrap"],"trait":["AsIndex","AsSize"]};

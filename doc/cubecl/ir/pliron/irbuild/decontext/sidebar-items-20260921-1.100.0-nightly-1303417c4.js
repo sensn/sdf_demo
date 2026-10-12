@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":["CloneAttributeIntoContext","CloneIntoContext","CloneTypeIntoContext","StableHash"]};

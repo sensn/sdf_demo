@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MemoryLogLevel","MemoryPoolConfig","MemoryPoolsConfig","MemoryPoolsPreset","PersistentMemory"],"struct":["MemoryConfig"]};

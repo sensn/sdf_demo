@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Device","DeviceUnavailable","MetalDevice","RuntimeId","WgpuBackend","WgpuDeviceKind"],"struct":["AmdDevice","CpuDevice","CudaDevice","DeviceId","WgpuDevice"]};

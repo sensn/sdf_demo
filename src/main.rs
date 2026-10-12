@@ -15,6 +15,7 @@ pub mod gui;
 pub mod input;
 mod kernel;
 pub mod render_loop;
+pub mod sdf_preprocessor;
 pub mod view;
 
 use app_state::ApplicationState;

@@ -1,0 +1,32 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Implement CloneTypeIntoContext for a Type by delegating to its own CloneIntoContext impl, then re-interning the clone into `dst_ctx`."><title>CloneTypeIntoContext in cubecl::ir::prelude - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc derive"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">CloneTypeIntoContext</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"><h2><a href="index.html">In cubecl::<wbr>ir::<wbr>prelude</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">cubecl</a>::<wbr><a href="../index.html">ir</a>::<wbr><a href="index.html">prelude</a></div><h1>Derive Macro <span class="derive">Clone<wbr>Type<wbr>Into<wbr>Context</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/pliron-derive/0.18.0/x86_64-unknown-linux-gnu/src/pliron_derive/lib.rs.html#1297">Source</a> </span></div><pre class="rust item-decl"><code>#[derive(CloneTypeIntoContext)]</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Implement <a href="../pliron/irbuild/decontext/trait.CloneTypeIntoContext.html">CloneTypeIntoContext</a>
+for a <a href="../pliron/type/trait.Type.html">Type</a> by delegating to its own
+<a href="../pliron/irbuild/decontext/trait.CloneIntoContext.html">CloneIntoContext</a> impl,
+then re-interning the clone into <code>dst_ctx</code>.</p>
+<p>The type must already implement
+<a href="../pliron/irbuild/decontext/trait.CloneIntoContext.html">CloneIntoContext</a> (e.g. via
+<a href="derive.CloneIntoContext.html" title="derive cubecl::ir::pliron::derive::CloneIntoContext"><code>#[derive(CloneIntoContext)]</code></a>,
+or <a href="../pliron/macro.impl_clone_into_context_for_clone.html"><code>impl_clone_into_context_for_clone!</code></a>).</p>
+<p>Usage:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::{
+    context::Context,
+    derive::{CloneIntoContext, CloneTypeIntoContext, pliron_type},
+    irbuild::decontext::CloneIntoContext <span class="kw">as _</span>, printable::Printable,
+};
+
+<span class="attr">#[pliron_type(
+    name = <span class="string">"test.point_type"</span>,
+    format = <span class="string">"`&lt;` $x `&gt;`"</span>,
+    generate_get = <span class="bool-val">true</span>,
+    verifier = <span class="string">"succ"
+</span>)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, CloneIntoContext, CloneTypeIntoContext)]
+</span><span class="kw">struct </span>PointType {
+    x: i32,
+}
+
+<span class="kw">let </span>src_ctx = Context::new();
+<span class="kw">let </span><span class="kw-2">mut </span>dst_ctx = Context::new();
+<span class="kw">let </span>p = PointType::get(<span class="kw-2">&amp;</span>src_ctx, <span class="number">1</span>).to_handle();
+<span class="kw">let </span>p2 = p.clone_into_context(<span class="kw-2">&amp;</span>src_ctx, <span class="kw-2">&amp;mut </span>dst_ctx);
+<span class="macro">assert_eq!</span>(p.disp(<span class="kw-2">&amp;</span>src_ctx).to_string(), p2.disp(<span class="kw-2">&amp;</span>dst_ctx).to_string());</code></pre></div></div></details></section></div></main></body></html>

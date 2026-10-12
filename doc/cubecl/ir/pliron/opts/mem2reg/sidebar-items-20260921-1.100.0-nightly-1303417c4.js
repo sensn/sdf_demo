@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PromotableOpKind"],"fn":["mem2reg"],"struct":["AllocInfo","Mem2RegPass"],"trait":["PromotableAllocationInterface","PromotableOpInterface"]};

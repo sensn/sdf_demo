@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["WALKCONFIG_POSTORDER_FORWARD","WALKCONFIG_POSTORDER_REVERSE","WALKCONFIG_PREORDER_FORWARD","WALKCONFIG_PREORDER_REVERSE"],"enum":["Direction","IRNode","Order"],"mod":["interruptible","uninterruptible"],"struct":["WalkConfig"]};

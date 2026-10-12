@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SwitchOpVerifyErr"],"struct":["BranchConditionalOp","BranchOp","SwitchCase","SwitchOp"]};

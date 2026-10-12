@@ -1,0 +1,43 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`#[pliron_type(...)]`: Unified macro for defining IR types."><title>pliron_type in cubecl::ir::pliron::derive - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc attr"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">pliron_type</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">pliron_<wbr>type</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#examples" title="Examples">Examples</a><ul><li><a href="#basic-type-definition" title="Basic type definition:">Basic type definition:</a></li><li><a href="#type-with-custom-format" title="Type with custom format:">Type with custom format:</a></li><li><a href="#type-with-get-method-generation" title="Type with get method generation:">Type with get method generation:</a></li></ul></li></ul></section><div id="rustdoc-modnav"><h2><a href="index.html">In cubecl::<wbr>ir::<wbr>pliron::<wbr>derive</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../index.html">cubecl</a>::<wbr><a href="../../index.html">ir</a>::<wbr><a href="../index.html">pliron</a>::<wbr><a href="index.html">derive</a></div><h1>Attribute Macro <span class="attr">pliron_<wbr>type</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/pliron-derive/0.18.0/x86_64-unknown-linux-gnu/src/pliron_derive/lib.rs.html#739">Source</a> </span></div><pre class="rust item-decl"><code>#[pliron_type]</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p><code>#[pliron_type(...)]</code>: Unified macro for defining IR types.</p>
+<p>This macro provides a simplified, unified syntax for defining IR types by expanding
+into the existing type definition macros. It supports the following configuration options:</p>
+<ul>
+<li><code>name = "dialect.type_name"</code>: The fully qualified name of the type (required).<br />
+Expands to [def_type].</li>
+<li><code>format = "format_string"</code>: Custom format string for printing/parsing (optional).<br />
+Expands to [format_type].</li>
+<li><code>verifier = "succ"</code>: Verifier implementation, currently only “succ” is supported (optional).<br />
+Expands to <a href="../../prelude/attr.verify_succ.html" title="attr cubecl::ir::pliron::derive::verify_succ">verify_succ</a>.</li>
+<li><code>generate_get = true/false</code>: Whether to generate a get method for the type (optional, default: false).<br />
+Expands to [derive_type_get].</li>
+</ul>
+<h3 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h3><h4 id="basic-type-definition"><a class="doc-anchor" href="#basic-type-definition">§</a>Basic type definition:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::pliron_type;
+
+<span class="attr">#[pliron_type(name = <span class="string">"test.unit_type"</span>, format, verifier = <span class="string">"succ"</span>)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+</span><span class="kw">pub struct </span>UnitType;</code></pre></div><h4 id="type-with-custom-format"><a class="doc-anchor" href="#type-with-custom-format">§</a>Type with custom format:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::pliron_type;
+
+<span class="attr">#[pliron_type(
+    name = <span class="string">"test.flags_type"</span>,
+    format = <span class="string">"`type` `{` $flags `}`"</span>,
+    verifier = <span class="string">"succ"
+</span>)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+</span><span class="kw">struct </span>FlagsType {
+    flags: u32,
+}</code></pre></div><h4 id="type-with-get-method-generation"><a class="doc-anchor" href="#type-with-get-method-generation">§</a>Type with get method generation:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::pliron_type;
+
+<span class="attr">#[pliron_type(
+    name = <span class="string">"test.vector_type"</span>,
+    generate_get = <span class="bool-val">true</span>,
+    format,
+    verifier = <span class="string">"succ"
+</span>)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+</span><span class="kw">struct </span>VectorType {
+    elem_ty: u32,
+    num_elems: u32,
+}</code></pre></div></div></details></section></div></main></body></html>

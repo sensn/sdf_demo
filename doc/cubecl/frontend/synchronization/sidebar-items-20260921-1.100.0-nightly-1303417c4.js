@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["sync_async_proxy_shared","sync_cube","sync_plane","sync_storage","workgroup_uniform_load","workgroup_uniform_load_atomic"],"mod":["sync_async_proxy_shared","sync_cube","sync_plane","sync_storage","workgroup_uniform_load","workgroup_uniform_load_atomic"]};

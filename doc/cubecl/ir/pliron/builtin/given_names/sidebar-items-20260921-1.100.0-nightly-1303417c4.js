@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["erase_given_names","get_block_arg_name","get_operation_result_name","insert_block_arg_name","insert_operation_result_name","remove_block_arg_name","remove_operation_result_name","set_block_arg_name","set_operation_result_name"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["visualize_basic_block","visualize_operation","visualize_region"]};

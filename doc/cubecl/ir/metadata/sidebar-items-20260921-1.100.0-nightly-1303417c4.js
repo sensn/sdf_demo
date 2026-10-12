@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["INFO_ALIGN","METADATA_BASE_LEN","METADATA_EXT_LEN"],"struct":["Info","Metadata","SizedInfoField"]};

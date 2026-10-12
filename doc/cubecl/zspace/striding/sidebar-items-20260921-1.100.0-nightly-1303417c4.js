@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["StrideError"],"fn":["has_contiguous_row_major_strides","has_pitched_row_major_strides","row_major_contiguous_strides","try_check_contiguous_row_major_strides","try_check_matching_ranks","try_check_pitched_row_major_strides"],"struct":["StrideRecord"]};

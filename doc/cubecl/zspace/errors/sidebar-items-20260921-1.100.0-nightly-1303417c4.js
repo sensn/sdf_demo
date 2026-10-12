@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BoundsError","ExpressionError","IndexKind","StrideError"],"struct":["StrideRecord"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["RegionPredecessor","RegionSuccessor","SymbolVisibility"],"fn":["all_region_predecessors"],"struct":["InvocationBounds"],"trait":["CallableOpInterface","RegionBranchOpInterface","RegionBranchTerminatorOpInterface","SymbolOpInterface"]};

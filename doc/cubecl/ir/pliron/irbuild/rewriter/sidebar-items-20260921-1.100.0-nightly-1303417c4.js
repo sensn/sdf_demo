@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["IRRewriter","RewriterConfig","ScopedRewriter"],"trait":["Rewriter"]};

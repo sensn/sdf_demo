@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["InputKind","MemoryClobbers","RegSpec"],"struct":["InlineAsmOp","InputSpec","InputSpecsAttr","MemoryClobbersAttr","RegSpecsAttr"]};

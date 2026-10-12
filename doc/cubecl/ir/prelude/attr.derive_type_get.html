@@ -1,0 +1,47 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Derive get methods for types that retrieve interned types."><title>derive_type_get in cubecl::ir::prelude - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc attr"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">derive_type_get</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">derive_<wbr>type_<wbr>get</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#examples" title="Examples">Examples</a><ul><li><a href="#named-fields-struct" title="Named fields struct:">Named fields struct:</a></li><li><a href="#tuple-struct" title="Tuple struct:">Tuple struct:</a></li><li><a href="#unit-struct" title="Unit struct:">Unit struct:</a></li></ul></li></ul></section><div id="rustdoc-modnav"><h2><a href="index.html">In cubecl::<wbr>ir::<wbr>prelude</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">cubecl</a>::<wbr><a href="../index.html">ir</a>::<wbr><a href="index.html">prelude</a></div><h1>Attribute Macro <span class="attr">derive_<wbr>type_<wbr>get</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/pliron-derive/0.18.0/x86_64-unknown-linux-gnu/src/pliron_derive/lib.rs.html#155">Source</a> </span></div><pre class="rust item-decl"><code>#[derive_type_get]</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Derive get methods for types that retrieve interned types.</p>
+<p><em>Note</em>: It is suggested to use the [pliron_type] macro instead of using this macro directly.
+The documention here is useful though, because [pliron_type]’s <code>generate_get</code> field
+expands to this macro.</p>
+<p>This macro generates a <code>get</code> method that returns a uniqued instance of the type.
+For unit structs (no fields), it takes only a <code>Context</code> parameter.
+For structs with fields, it takes a <code>Context</code> parameter plus a parameter for each field.</p>
+<h3 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h3><h4 id="named-fields-struct"><a class="doc-anchor" href="#named-fields-struct">§</a>Named fields struct:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::{def_type, derive_type_get, format_type, verify_succ};
+<span class="kw">use </span>pliron::context::Context;
+
+<span class="attr">#[verify_succ]
+#[def_type(<span class="string">"my_dialect.vector_type"</span>)]
+#[format_type]
+#[derive_type_get]  </span><span class="comment">// Auto-generates get method
+</span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+</span><span class="kw">pub struct </span>VectorType {
+    elem_ty: u32,
+    num_elems: u32,
+}
+
+<span class="comment">// Usage of the auto-generated get method:
+</span><span class="kw">let </span>vector_type = VectorType::get(ctx, <span class="number">42</span>, <span class="number">8</span>); <span class="comment">// get(ctx, elem_ty, num_elems)</span></code></pre></div><h4 id="tuple-struct"><a class="doc-anchor" href="#tuple-struct">§</a>Tuple struct:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::{def_type, derive_type_get, format_type, verify_succ};
+<span class="kw">use </span>pliron::context::Context;
+
+<span class="attr">#[verify_succ]
+#[def_type(<span class="string">"my_dialect.tuple_type"</span>)]
+#[format_type]
+#[derive_type_get]  </span><span class="comment">// Auto-generates get method
+</span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+</span><span class="kw">pub struct </span>TupleType(u32, String, bool);
+
+<span class="comment">// Usage of the auto-generated get method:
+</span><span class="kw">let </span>tuple_type = TupleType::get(ctx, <span class="number">42</span>, <span class="string">"hello"</span>.to_string(), <span class="bool-val">true</span>); <span class="comment">// get(ctx, field_0, field_1, field_2)</span></code></pre></div><h4 id="unit-struct"><a class="doc-anchor" href="#unit-struct">§</a>Unit struct:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::{def_type, derive_type_get, format_type, verify_succ};
+<span class="kw">use </span>pliron::context::Context;
+
+<span class="attr">#[verify_succ]
+#[def_type(<span class="string">"my_dialect.unit_type"</span>)]
+#[format_type]
+#[derive_type_get]  </span><span class="comment">// Auto-generates get method
+</span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+</span><span class="kw">pub struct </span>UnitType;
+
+<span class="comment">// Usage of the auto-generated get method:
+</span><span class="kw">let </span>unit_type = UnitType::get(ctx); <span class="comment">// get(ctx) - no additional parameters</span></code></pre></div></div></details></section></div></main></body></html>

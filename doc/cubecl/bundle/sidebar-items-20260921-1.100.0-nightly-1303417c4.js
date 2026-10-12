@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FORMAT_VERSION","MAGIC","MANIFEST_SCHEMA"],"enum":["BundleError","BundleFormat","EmbeddedBundleError"],"fn":["export","flat_bundle_version","import","open"],"struct":["BundleManifest","EmbeddedBundle","EnvironmentInfo","ExportOptions","ImportReport","SqliteBundle"],"trait":["Bundle"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT","EXTENSION"],"enum":["CacheOption"],"fn":["activate","active","bundle","file_name","generation","list","load","namespaces","open","path","root","set_root","store"],"struct":["Bundle","Namespace","Store","StoreOptions"]};

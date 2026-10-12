@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["WalkContinue"],"fn":["walk_advance","walk_break","walk_skip"],"mod":["immutable","mutable"],"type":["WalkResult"]};

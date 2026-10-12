@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Location","Source"],"fn":["erase_locations"],"trait":["Located"]};

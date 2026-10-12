@@ -1,0 +1,24 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Implement Op Interface for an Op. The interface trait must define a `verify` function with type OpInterfaceVerifier"><title>op_interface_impl in cubecl::ir::pliron::derive - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc attr"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">op_interface_impl</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"><h2><a href="index.html">In cubecl::<wbr>ir::<wbr>pliron::<wbr>derive</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../index.html">cubecl</a>::<wbr><a href="../../index.html">ir</a>::<wbr><a href="../index.html">pliron</a>::<wbr><a href="index.html">derive</a></div><h1>Attribute Macro <span class="attr">op_<wbr>interface_<wbr>impl</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/pliron-derive/0.18.0/x86_64-unknown-linux-gnu/src/pliron_derive/lib.rs.html#670">Source</a> </span></div><pre class="rust item-decl"><code>#[op_interface_impl]</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Implement <a href="../pliron/op/trait.Op.html">Op</a> Interface for an Op. The interface trait must define
+a <code>verify</code> function with type <a href="../pliron/op/type.OpInterfaceVerifier.html">OpInterfaceVerifier</a></p>
+<p>Usage:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code>
+<span class="attr">#[verify_succ]
+#[def_op(<span class="string">"dialect.name"</span>)]
+#[format_op]
+</span><span class="kw">struct </span>MyOp;
+
+<span class="attr">#[op_interface]
+</span><span class="kw">pub trait </span>MyOpInterface {
+    <span class="kw">fn </span>gubbi(<span class="kw-2">&amp;</span><span class="self">self</span>);
+    <span class="kw">fn </span>verify(op: <span class="kw-2">&amp;</span><span class="kw">dyn </span>Op, ctx: <span class="kw-2">&amp;</span>Context) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt;
+    <span class="kw">where </span><span class="self">Self</span>: Sized,
+    {
+        <span class="prelude-val">Ok</span>(())
+    }
+}
+
+<span class="attr">#[op_interface_impl]
+</span><span class="kw">impl </span>MyOpInterface <span class="kw">for </span>MyOp {
+    <span class="kw">fn </span>gubbi(<span class="kw-2">&amp;</span><span class="self">self</span>) { <span class="macro">println!</span>(<span class="string">"gubbi"</span>); }
+}</code></pre></div></div></details></section></div></main></body></html>

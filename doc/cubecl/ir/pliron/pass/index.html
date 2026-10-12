@@ -1,0 +1,150 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="A framework to run passes and manage analyses."><title>cubecl::ir::pliron::pass - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="../sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module pass</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module pass</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#usage" title="Usage">Usage</a><ul><li><a href="#example-define-and-run-a-simple-pass" title="Example: Define and run a simple pass">Example: Define and run a simple pass</a></li><li><a href="#example-restrict-a-pass-to-a-specific-op-kind" title="Example: Restrict a pass to a specific op kind.">Example: Restrict a pass to a specific op kind.</a></li><li><a href="#example-analysis-caching-and-preservation" title="Example: Analysis caching and preservation">Example: Analysis caching and preservation</a></li></ul></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#traits" title="Traits">Traits</a></li><li><a href="#types" title="Type Aliases">Type Aliases</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In cubecl::<wbr>ir::<wbr>pliron</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../index.html">cubecl</a>::<wbr><a href="../../index.html">ir</a>::<wbr><a href="../index.html">pliron</a></div><h1>Module <span>pass</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/pliron/0.18.0/x86_64-unknown-linux-gnu/src/pliron/lib.rs.html#54">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>A framework to run passes and manage analyses.</p>
+<p>The design is centered around the <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a> trait and aims to be
+flexible and composable. Passes can be combined into pipelines,
+and analyses can be cached and invalidated between passes.</p>
+<p>This module provides:</p>
+<ol>
+<li><a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass"><code>Pass</code></a>: A transformation that runs on an operation.</li>
+<li><a href="../../prelude/struct.Passes.html" title="struct cubecl::ir::pliron::pass::Passes"><code>Passes</code></a>: Runs a sequence of <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a>es on the provided operation,
+managing invalidation of analyses between passes.</li>
+<li><a href="../../prelude/struct.NestedOpsPass.html" title="struct cubecl::ir::pliron::pass::NestedOpsPass"><code>NestedOpsPass</code></a>: Runs a provided <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a> on each immediately nested operation,
+managing invalidation of analyses between runs.</li>
+<li><a href="../../prelude/struct.GuardedPass.html" title="struct cubecl::ir::pliron::pass::GuardedPass"><code>GuardedPass</code></a>, <a href="../../prelude/type.OpPass.html" title="type cubecl::ir::pliron::pass::OpPass"><code>OpPass</code></a>, and <a href="../../prelude/type.OpInterfacePass.html" title="type cubecl::ir::pliron::pass::OpInterfacePass"><code>OpInterfacePass</code></a>: Wrappers that
+constrain where a pass is allowed to run.</li>
+<li><a href="../../prelude/trait.Analysis.html" title="trait cubecl::ir::pliron::pass::Analysis"><code>Analysis</code></a> and <a href="../../prelude/struct.AnalysisManager.html" title="struct cubecl::ir::pliron::pass::AnalysisManager"><code>AnalysisManager</code></a>: Provides analyses caching with
+preservation and invalidation support.</li>
+<li><a href="../../prelude/struct.PMConfig.html" title="struct cubecl::ir::pliron::pass::PMConfig"><code>PMConfig</code></a> provides configuration that can be set via the <a href="../../prelude/struct.AnalysisManager.html" title="struct cubecl::ir::pliron::pass::AnalysisManager">AnalysisManager</a>.</li>
+</ol>
+<h2 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h2>
+<p>A pass receives three inputs:</p>
+<ul>
+<li>The operation it should process,</li>
+<li>A mutable reference to the context</li>
+<li>An analysis cache.</li>
+</ul>
+<p>It returns a <a href="../../prelude/struct.PassResult.html" title="struct cubecl::ir::pliron::pass::PassResult"><code>PassResult</code></a> indicating whether IR changed and which analyses
+are preserved.</p>
+<p>If a pass reports <a href="../../prelude/enum.IRStatus.html#variant.Unchanged" title="variant cubecl::ir::prelude::IRStatus::Unchanged"><code>IRStatus::Unchanged</code></a>, all analyses are treated as
+preserved. If it reports changes, analyses not explicitly preserved are
+invalidated.</p>
+<p><strong>NOTE</strong>: A pass must not modify the IR outside of the operation it is applied to.</p>
+<h3 id="example-define-and-run-a-simple-pass"><a class="doc-anchor" href="#example-define-and-run-a-simple-pass">§</a>Example: Define and run a simple pass</h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::{
+    context::Context,
+    operation::Operation,
+    pass::{AnalysisManager, Pass, PassResult, Passes},
+    result::Result,
+    irbuild::IRStatus,
+};
+
+<span class="attr">#[derive(Default)]
+</span><span class="kw">struct </span>NoOpPass;
+
+<span class="kw">impl </span>Pass <span class="kw">for </span>NoOpPass {
+    <span class="kw">fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>str { <span class="string">"noop" </span>}
+
+    <span class="kw">fn </span>run(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        _op: pliron::context::Ptr&lt;Operation&gt;,
+        _ctx: <span class="kw-2">&amp;mut </span>Context,
+        _analyses: <span class="kw-2">&amp;mut </span>AnalysisManager,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;PassResult&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = PassResult::default();
+        result.ir_changed = IRStatus::Unchanged;
+        <span class="prelude-val">Ok</span>(result)
+    }
+}
+
+<span class="kw">fn </span>run_pipeline(
+    root: pliron::context::Ptr&lt;Operation&gt;,
+    ctx: <span class="kw-2">&amp;mut </span>Context,
+) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>passes = Passes::default();
+    passes.add_pass(NoOpPass);
+    <span class="kw">let </span>res = passes.run(root, ctx, <span class="kw-2">&amp;mut </span>AnalysisManager::default())<span class="question-mark">?</span>;
+    <span class="macro">assert!</span>(<span class="macro">matches!</span>(res.ir_changed, IRStatus::Unchanged));
+    <span class="prelude-val">Ok</span>(())
+}</code></pre></div><h3 id="example-restrict-a-pass-to-a-specific-op-kind"><a class="doc-anchor" href="#example-restrict-a-pass-to-a-specific-op-kind">§</a>Example: Restrict a pass to a specific op kind.</h3>
+<p><a href="../../prelude/struct.GuardedPass.html" title="struct cubecl::ir::pliron::pass::GuardedPass">GuardedPass</a> is a <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a> wrapper restricting the run to specific operations.
+<a href="../../prelude/type.OpPass.html" title="type cubecl::ir::pliron::pass::OpPass">OpPass</a> is a <a href="../../prelude/struct.GuardedPass.html" title="struct cubecl::ir::pliron::pass::GuardedPass">GuardedPass</a> that restricts the run to a specific <a href="../../prelude/trait.Op.html" title="trait cubecl::ir::pliron::op::Op">Op</a>.
+<a href="../../prelude/struct.NestedOpsPass.html" title="struct cubecl::ir::pliron::pass::NestedOpsPass">NestedOpsPass</a> is a <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a> that runs a provided <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a> on each immediately nested operation.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::{
+    context::Context,
+    irbuild::IRStatus,
+    operation::Operation,
+    pass::{AnalysisManager, NestedOpsPass, Passes, OpPass, Pass, PassResult},
+    result::Result,
+};
+<span class="kw">use </span>pliron::builtin::ops::{FuncOp, ModuleOp};
+
+<span class="attr">#[derive(Default)]
+</span><span class="kw">struct </span>MyFuncPass;
+
+<span class="kw">impl </span>Pass <span class="kw">for </span>MyFuncPass {
+    <span class="kw">fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>str { <span class="string">"my_func_pass" </span>}
+
+    <span class="kw">fn </span>run(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        _op: pliron::context::Ptr&lt;Operation&gt;,
+        _ctx: <span class="kw-2">&amp;mut </span>Context,
+        _analyses: <span class="kw-2">&amp;mut </span>AnalysisManager,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;PassResult&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = PassResult::default();
+        result.ir_changed = IRStatus::Unchanged;
+        <span class="prelude-val">Ok</span>(result)
+    }
+}
+
+<span class="comment">// Run a pass manager only when the root op is ModuleOp.
+</span><span class="kw">let </span><span class="kw-2">mut </span>passes = OpPass::&lt;ModuleOp, Passes&gt;::default();
+<span class="comment">// Add a pass that runs only on nested FuncOp operations.
+</span><span class="kw">let </span>nested_pass = NestedOpsPass::new(OpPass::&lt;FuncOp, MyFuncPass&gt;::default());
+passes.add_pass(nested_pass);</code></pre></div><h3 id="example-analysis-caching-and-preservation"><a class="doc-anchor" href="#example-analysis-caching-and-preservation">§</a>Example: Analysis caching and preservation</h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::{
+    context::Context,
+    operation::Operation,
+    pass::{Analysis, AnalysisManager, Pass, PassResult},
+    result::Result,
+};
+
+<span class="kw">struct </span>MyAnalysis;
+
+<span class="kw">impl </span>Analysis <span class="kw">for </span>MyAnalysis {
+    <span class="kw">fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>str { <span class="string">"my_analysis" </span>}
+    <span class="kw">fn </span>compute(
+        _op: pliron::context::Ptr&lt;Operation&gt;,
+        _ctx: <span class="kw-2">&amp;</span>Context,
+        _analyses: <span class="kw-2">&amp;mut </span>AnalysisManager,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="prelude-val">Ok</span>(<span class="self">Self</span>)
+    }
+}
+
+<span class="kw">struct </span>UsesMyAnalysis;
+
+<span class="kw">impl </span>Pass <span class="kw">for </span>UsesMyAnalysis {
+    <span class="kw">fn </span>name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>str { <span class="string">"uses_my_analysis" </span>}
+
+    <span class="kw">fn </span>run(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        op: pliron::context::Ptr&lt;Operation&gt;,
+        ctx: <span class="kw-2">&amp;mut </span>Context,
+        analyses: <span class="kw-2">&amp;mut </span>AnalysisManager,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;PassResult&gt; {
+        <span class="kw">let </span>_analysis = analyses.get_analysis::&lt;MyAnalysis&gt;(op, ctx)<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>result = PassResult::default();
+        <span class="comment">// If this pass mutates IR but does not invalidate MyAnalysis,
+        // explicitly preserve it.
+        </span>result.set_preserved::&lt;MyAnalysis&gt;();
+        <span class="prelude-val">Ok</span>(result)
+    }
+}</code></pre></div></div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.AnalysisManager.html" title="struct cubecl::ir::pliron::pass::AnalysisManager">Analysis<wbr>Manager</a></dt><dd>A manager for analyses, responsible for caching and invalidating them.</dd><dt><a class="struct" href="struct.GuardedPass.html" title="struct cubecl::ir::pliron::pass::GuardedPass">Guarded<wbr>Pass</a></dt><dd>Adds a <a href="../../prelude/trait.Guard.html" title="trait cubecl::ir::pliron::pass::Guard">Guard</a> to a <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a>, making it run only on <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a>s that the <a href="../../prelude/trait.Guard.html" title="trait cubecl::ir::pliron::pass::Guard">Guard</a> allows.</dd><dt><a class="struct" href="struct.NestedOpsPass.html" title="struct cubecl::ir::pliron::pass::NestedOpsPass">Nested<wbr>OpsPass</a></dt><dd>Runs a provided <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a> on each immediately nested <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a>.
+Manages invalidation of analyses between runs.</dd><dt><a class="struct" href="struct.OpGuard.html" title="struct cubecl::ir::pliron::pass::OpGuard">OpGuard</a></dt><dd>Allow <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a>s of a specific <code>Op</code>.</dd><dt><a class="struct" href="struct.OpInterfaceGuard.html" title="struct cubecl::ir::pliron::pass::OpInterfaceGuard">OpInterface<wbr>Guard</a></dt><dd>Allow <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a>s that implement a specific <code>OpInterface</code>.</dd><dt><a class="struct" href="struct.PMConfig.html" title="struct cubecl::ir::pliron::pass::PMConfig">PMConfig</a></dt><dd><a href="../../prelude/trait.PassManager.html" title="trait cubecl::ir::pliron::pass::PassManager">PassManager</a> configuration.</dd><dt><a class="struct" href="struct.PMData.html" title="struct cubecl::ir::pliron::pass::PMData">PMData</a></dt><dd>Common data across <a href="../../prelude/trait.PassManager.html" title="trait cubecl::ir::pliron::pass::PassManager">PassManager</a>s stored in <a href="../../prelude/struct.AnalysisManager.html" title="struct cubecl::ir::pliron::pass::AnalysisManager">AnalysisManager</a>.</dd><dt><a class="struct" href="struct.PMState.html" title="struct cubecl::ir::pliron::pass::PMState">PMState</a></dt><dd>Internal state maintained across <a href="../../prelude/trait.PassManager.html" title="trait cubecl::ir::pliron::pass::PassManager">PassManager</a>s.
+For use by <a href="../../prelude/trait.PassManager.html" title="trait cubecl::ir::pliron::pass::PassManager">PassManager</a> implementations and not by passes themselves.</dd><dt><a class="struct" href="struct.PassResult.html" title="struct cubecl::ir::pliron::pass::PassResult">Pass<wbr>Result</a></dt><dd>The result of running a <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a>.</dd><dt><a class="struct" href="struct.Passes.html" title="struct cubecl::ir::pliron::pass::Passes">Passes</a></dt><dd>Runs a sequence of <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a>es on the provided <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a>.
+Manages invalidation of analyses between passes.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.PrintOpToFileErr.html" title="enum cubecl::ir::pliron::pass::PrintOpToFileErr">Print<wbr>OpTo<wbr>File<wbr>Err</a></dt></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.Analysis.html" title="trait cubecl::ir::pliron::pass::Analysis">Analysis</a></dt><dd>An analysis is any code that computes information
+about an <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a> without modifying the IR.</dd><dt><a class="trait" href="trait.Guard.html" title="trait cubecl::ir::pliron::pass::Guard">Guard</a></dt><dd>A <code>Guard</code> determines whether a <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a> is applicable to a given <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a>.</dd><dt><a class="trait" href="trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a></dt><dd>A pass is any code that runs on the provided <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a>.
+Typically a transformation or (nested) passes.</dd><dt><a class="trait" href="trait.PassManager.html" title="trait cubecl::ir::pliron::pass::PassManager">Pass<wbr>Manager</a></dt><dd>A <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a> that contains, manages and runs other <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a>es.
+The only requirement (that cannot be enforced by the type system)
+is that a <a href="../../prelude/trait.PassManager.html" title="trait cubecl::ir::pliron::pass::PassManager">PassManager</a> <a href="../../prelude/trait.Pass.html" title="trait cubecl::ir::pliron::pass::Pass">Pass</a> must run its contained <a href="../../prelude/struct.Passes.html" title="struct cubecl::ir::pliron::pass::Passes">Passes</a> via
+<a href="../../prelude/trait.PassManager.html#method.run_pass" title="associated function cubecl::ir::prelude::PassManager::run_pass">PassManager::run_pass</a>.</dd></dl><h2 id="types" class="section-header">Type Aliases<a href="#types" class="anchor">§</a></h2><dl class="item-table"><dt><a class="type" href="type.OpInterfacePass.html" title="type cubecl::ir::pliron::pass::OpInterfacePass">OpInterface<wbr>Pass</a></dt><dd>A <a href="../../prelude/struct.GuardedPass.html" title="struct cubecl::ir::pliron::pass::GuardedPass">GuardedPass</a> that allows <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a>s that implement a specific <code>OpInterface</code>.</dd><dt><a class="type" href="type.OpPass.html" title="type cubecl::ir::pliron::pass::OpPass">OpPass</a></dt><dd>A <a href="../../prelude/struct.GuardedPass.html" title="struct cubecl::ir::pliron::pass::GuardedPass">GuardedPass</a> that allows <a href="../../prelude/struct.Operation.html" title="struct cubecl::ir::pliron::operation::Operation">Operation</a>s of a specific <a href="../../prelude/trait.Op.html" title="trait cubecl::ir::pliron::op::Op">Op</a>.</dd></dl></section></div></main></body></html>

@@ -1,0 +1,64 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`#[pliron_op(...)]`: Unified macro for defining IR operations."><title>pliron_op in cubecl::ir::pliron::derive - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc attr"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">pliron_op</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">pliron_<wbr>op</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#examples" title="Examples">Examples</a><ul><li><a href="#basic-operation-definition" title="Basic operation definition:">Basic operation definition:</a></li><li><a href="#operation-with-custom-format-and-interfaces" title="Operation with custom format and interfaces:">Operation with custom format and interfaces:</a></li><li><a href="#operation-with-specified-attributes" title="Operation with specified attributes:">Operation with specified attributes:</a></li><li><a href="#operation-with-specified-operands" title="Operation with specified operands:">Operation with specified operands:</a></li><li><a href="#operation-with-specified-results" title="Operation with specified results:">Operation with specified results:</a></li></ul></li></ul></section><div id="rustdoc-modnav"><h2><a href="index.html">In cubecl::<wbr>ir::<wbr>pliron::<wbr>derive</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../index.html">cubecl</a>::<wbr><a href="../../index.html">ir</a>::<wbr><a href="../index.html">pliron</a>::<wbr><a href="index.html">derive</a></div><h1>Attribute Macro <span class="attr">pliron_<wbr>op</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/pliron-derive/0.18.0/x86_64-unknown-linux-gnu/src/pliron_derive/lib.rs.html#873">Source</a> </span></div><pre class="rust item-decl"><code>#[pliron_op]</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p><code>#[pliron_op(...)]</code>: Unified macro for defining IR operations.</p>
+<p>This macro provides a simplified, unified syntax for defining IR operations by expanding
+into the existing operation definition macros. It supports the following configuration options:</p>
+<ul>
+<li><code>name = "dialect.op_name"</code>: The fully qualified name of the operation (required).<br />
+Expands to [def_op].</li>
+<li><code>format = "format_string"</code>: Custom format string for printing/parsing (optional).<br />
+Expands to [format_op].</li>
+<li><code>interfaces = [Interface1, Interface2, ...]</code>: List of interfaces to implement (optional).<br />
+Expands to [derive_op_interface_impl].</li>
+<li><code>attributes = (attr_name: AttrType, ...)</code>: List of attributes with their types (optional).<br />
+Expands to [derive_attr_get_set], generating getter and setter methods.</li>
+<li><code>operands = (name, name: Type, _, _: Type, ...)</code>: List of operand specs (optional).<br />
+Expands to [operands].</li>
+<li><code>results = (name, name: Type, _, _: Type, ...)</code>: List of result specs (optional).<br />
+Expands to [results].</li>
+<li><code>verifier = "succ"</code>: Verifier implementation, currently only “succ” is supported (optional).<br />
+Expands to <a href="../../prelude/attr.verify_succ.html" title="attr cubecl::ir::pliron::derive::verify_succ">verify_succ</a>.</li>
+</ul>
+<h3 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h3><h4 id="basic-operation-definition"><a class="doc-anchor" href="#basic-operation-definition">§</a>Basic operation definition:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::pliron_op;
+
+<span class="attr">#[pliron_op(name = <span class="string">"test.my_op"</span>, format, verifier = <span class="string">"succ"</span>)]
+</span><span class="kw">struct </span>MyOp;</code></pre></div><h4 id="operation-with-custom-format-and-interfaces"><a class="doc-anchor" href="#operation-with-custom-format-and-interfaces">§</a>Operation with custom format and interfaces:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::pliron_op;
+<span class="kw">use </span>pliron::builtin::op_interfaces::NRegionsInterface;
+
+<span class="attr">#[pliron_op(
+    name = <span class="string">"test.if_op"</span>,
+    format = <span class="string">"`(`$0`)` region($0)"</span>,
+    interfaces = [ NRegionsInterface&lt;<span class="number">1</span>&gt; ]</span>,
+    verifier = <span class="string">"succ"
+</span>)]
+<span class="kw">struct </span>IfOp;</code></pre></div><h4 id="operation-with-specified-attributes"><a class="doc-anchor" href="#operation-with-specified-attributes">§</a>Operation with specified attributes:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::pliron_op;
+<span class="kw">use </span>pliron::builtin::attributes::{UnitAttr, IntegerAttr};
+
+<span class="attr">#[pliron_op(
+    name = <span class="string">"dialect.test"</span>,
+    format,
+    attributes = (attr1: UnitAttr, attr2: IntegerAttr),
+    verifier = <span class="string">"succ"
+</span>)]
+</span><span class="kw">struct </span>CallOp;</code></pre></div><h4 id="operation-with-specified-operands"><a class="doc-anchor" href="#operation-with-specified-operands">§</a>Operation with specified operands:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::pliron_op;
+<span class="kw">use </span>pliron::builtin::types::{IntegerType, UnitType};
+
+<span class="attr">#[pliron_op(
+    name = <span class="string">"dialect.with_operands"</span>,
+    format,
+    operands = (lhs: IntegerType, <span class="kw">_</span>, rhs, <span class="kw">_</span>: UnitType),
+    verifier = <span class="string">"succ"
+</span>)]
+</span><span class="kw">struct </span>WithOperandsOp;</code></pre></div><h4 id="operation-with-specified-results"><a class="doc-anchor" href="#operation-with-specified-results">§</a>Operation with specified results:</h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::pliron_op;
+<span class="kw">use </span>pliron::builtin::types::{IntegerType, UnitType};
+
+<span class="attr">#[pliron_op(
+    name = <span class="string">"dialect.with_results"</span>,
+    format,
+    results = (out: IntegerType, <span class="kw">_</span>: UnitType),
+    verifier = <span class="string">"succ"
+</span>)]
+</span><span class="kw">struct </span>WithResultsOp;</code></pre></div></div></details></section></div></main></body></html>

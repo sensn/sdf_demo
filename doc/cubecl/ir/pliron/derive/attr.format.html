@@ -1,0 +1,107 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Derive Printable and Parsable for Rust types. Use this for types other than `Op`, `Type` and `Attribute`s."><title>format in cubecl::ir::pliron::derive - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc attr"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">format</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"><h2><a href="index.html">In cubecl::<wbr>ir::<wbr>pliron::<wbr>derive</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../../index.html">cubecl</a>::<wbr><a href="../../index.html">ir</a>::<wbr><a href="../index.html">pliron</a>::<wbr><a href="index.html">derive</a></div><h1>Attribute Macro <span class="attr">format</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/pliron-derive/0.18.0/x86_64-unknown-linux-gnu/src/pliron_derive/lib.rs.html#440">Source</a> </span></div><pre class="rust item-decl"><code>#[format]</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Derive <a href="../pliron/printable/trait.Printable.html">Printable</a> and
+<a href="../pliron/parsable/trait.Parsable.html">Parsable</a> for Rust types.
+Use this for types other than <code>Op</code>, <code>Type</code> and <code>Attribute</code>s.</p>
+<p>A format string can be specified as an argument to the macro, to customize the syntax.
+Without a format string, the default syntax is used. For enums, no format string is allowed
+on the enum itself, but it is allowed on its variants.</p>
+<p>Primarily, the following two are used to refer to fields in a struct or tuple:</p>
+<ol>
+<li>A named variable <code>$name</code> specifies a named struct field.</li>
+<li>An unnamed variable <code>$i</code> specifies the i’th field of a tuple struct.</li>
+</ol>
+<p>Struct (or tuple) fields that are either [Option] or [Vec] (or an array) must to be specified
+using the <code>opt</code> and <code>vec</code> directives respectively (i.e., a format string is mandatory).</p>
+<p>The <code>opt</code> directive takes one mandatory argument, a variable specifying the field name with
+type <code>Option</code>. It also supports optional <code>label</code> and <code>delimiters</code> directives:</p>
+<ol>
+<li><code>label($name)</code>: uses <code>name :</code> as a prefix for the optional value.</li>
+<li><code>delimiters(</code>open<code>, </code>close<code>)</code>: wraps the optional value with the given delimiters.</li>
+</ol>
+<p>The <code>vec</code> directive takes two arguments, the first is a variable specifying the field name
+with type <code>Vec</code> (or array) and the second is another directive to specify a
+<a href="../pliron/printable/enum.ListSeparator.html">ListSeparator</a>.</p>
+<p>The following directives are supported:</p>
+<ol>
+<li><code>NewLine</code>: takes no argument, and specifies a newline to be used as list separator.</li>
+<li><code>CharNewline(`c`)</code>: takes a single character argument that will be followed by a newline.</li>
+<li><code>Char(`c`)</code>: takes a single character argument that will be used as separator.</li>
+<li><code>CharSpace(`c`)</code>: takes a single character argument that will be followed by a space.</li>
+</ol>
+<p>Generic structs and enums are supported. The macro preserves generic parameters on the
+generated <code>Printable</code> and <code>Parsable</code> impls, but it does not synthesize trait bounds.
+Any generic field that is parsed or printed through the format must therefore carry explicit
+bounds on the type itself. In practice, this usually means a bound like
+<code>T: Printable + Parsable&lt;Arg = (), Parsed = T&gt;</code>.</p>
+<p>Examples:</p>
+<ol>
+<li>Derive for a struct, with no format string (default format):
+(Note that the field u64 has both <code>Printable</code> and <code>Parsable</code> implemented).</li>
+</ol>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::format;
+<span class="attr">#[format]
+</span><span class="kw">struct </span>IntWrapper {
+   inner: u64,
+}</code></pre></div>
+<ol start="2">
+<li>An example with a custom format string:</li>
+</ol>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::format;
+<span class="attr">#[format(<span class="string">"`BubbleWrap` `[` $inner `]`"</span>)]
+</span><span class="kw">struct </span>IntWrapperCustom {
+  inner: u64,
+}</code></pre></div>
+<ol start="3">
+<li>An example for an enum (custom format strings are allowed for the variants only).</li>
+</ol>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::format;
+<span class="kw">use </span>pliron::{builtin::types::IntegerType, r#type::TypedHandle};
+<span class="attr">#[format]
+</span><span class="kw">enum </span>Enum {
+    A(TypedHandle&lt;IntegerType&gt;),
+    B {
+        one: TypedHandle&lt;IntegerType&gt;,
+        two: u64,
+    },
+    C,
+    <span class="attr">#[format(<span class="string">"`&lt;` $upper `/` $lower `&gt;`"</span>)]
+    </span>Op {
+        upper: u64,
+        lower: u64,
+    },
+}</code></pre></div>
+<ol start="4">
+<li>An example with <code>Option</code> and <code>Vec</code> fields</li>
+</ol>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::format;
+<span class="attr">#[format(<span class="string">"`&lt;` opt($a) `;` vec($b, Char(`,`)) `&gt;`"</span>)]
+</span><span class="kw">struct </span>OptAndVec {
+   a: <span class="prelude-ty">Option</span>&lt;u64&gt;,
+   b: Vec&lt;u64&gt;,
+}</code></pre></div>
+<ol start="5">
+<li>An example with a generic field and explicit bounds:</li>
+</ol>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::format;
+<span class="kw">use </span>pliron::{parsable::Parsable, printable::Printable};
+
+<span class="attr">#[format]
+</span><span class="kw">struct </span>Wrapper&lt;T&gt;
+<span class="kw">where
+    </span>T: Printable + Parsable&lt;Arg = (), Parsed = T&gt;,
+{
+    value: T,
+}</code></pre></div>
+<ol start="6">
+<li>An example with an optional field using <code>label</code> and <code>delimiters</code> in <code>opt</code>:</li>
+</ol>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>pliron::derive::format;
+<span class="attr">#[format(<span class="string">"`&lt;` opt($a, label($value), delimiters(`(`, `)`)) `&gt;`"</span>)]
+</span><span class="kw">struct </span>OptionalField {
+   a: <span class="prelude-ty">Option</span>&lt;u64&gt;,
+}</code></pre></div></div></details></section></div></main></body></html>

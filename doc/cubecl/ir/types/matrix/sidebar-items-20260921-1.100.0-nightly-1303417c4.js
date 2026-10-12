@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MatrixIdent","MatrixLayout","MatrixScope"],"struct":["MatrixShape","MatrixType"]};

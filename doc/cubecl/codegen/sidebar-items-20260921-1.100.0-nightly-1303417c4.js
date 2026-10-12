@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["InfoBuilder","KernelExpansion","KernelIntegrator","MetadataBuilder","ScalarBuilder","ScalarInfo","VulkanCompilationOptions","WgpuCompilationOptions"],"type":["ScalarValues"]};

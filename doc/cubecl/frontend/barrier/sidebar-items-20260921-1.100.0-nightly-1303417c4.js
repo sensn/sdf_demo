@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["copy_async","copy_async_checked"],"mod":["copy_async","copy_async_checked"],"struct":["Barrier","BarrierToken"],"type":["BarrierExpand"]};

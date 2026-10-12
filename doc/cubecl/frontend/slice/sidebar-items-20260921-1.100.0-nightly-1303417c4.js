@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BufferArg"],"fn":["from_raw_parts"],"struct":["BufferBinding","BufferCompilationArg","ReadOnly","ReadWrite"],"trait":["SliceExt","SliceOperator","SliceOperatorExpand","SliceVectorExt","SliceVisibility"],"type":["SliceExpand"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TimingMethod"],"fn":["run_benchmark"],"struct":["BenchmarkComputations","BenchmarkDurations","BenchmarkResult","Instant","ProfileDuration"],"trait":["Benchmark"]};

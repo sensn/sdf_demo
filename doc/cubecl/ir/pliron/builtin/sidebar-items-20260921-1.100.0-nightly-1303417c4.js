@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["attr_interfaces","attributes","given_names","interface_impls","op_interfaces","ops","type_interfaces","types"]};

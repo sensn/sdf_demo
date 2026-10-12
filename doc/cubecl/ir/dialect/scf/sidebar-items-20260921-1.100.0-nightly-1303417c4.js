@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["BranchToSCFConversion","IfOp","RangeLoopOp","SwitchOp","WhileOp"],"type":["BranchToSCFPass"]};

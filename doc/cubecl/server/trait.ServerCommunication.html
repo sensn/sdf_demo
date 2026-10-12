@@ -1,0 +1,134 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Defines functions for optimized data transfer between servers, supporting custom communication mechanisms such as peer-to-peer communication or specialized implementations."><title>ServerCommunication in cubecl::server - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">ServerCommunication</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Server<wbr>Communication</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#inside-the-tainted-buffer-rules" title="Inside the tainted-buffer rules">Inside the tainted-buffer rules</a></li></ul><h3><a href="#provided-methods">Provided Methods</a></h3><ul class="block"><li><a href="#method.all_reduce" title="all_reduce">all_reduce</a></li><li><a href="#method.comm_init" title="comm_init">comm_init</a></li><li><a href="#method.recv" title="recv">recv</a></li><li><a href="#method.send" title="send">send</a></li><li><a href="#method.sync_collective" title="sync_collective">sync_collective</a></li></ul><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2><a href="index.html">In cubecl::<wbr>server</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">cubecl</a>::<wbr><a href="index.html">server</a></div><h1>Trait <span class="trait">Server<wbr>Communication</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/server/base.rs.html#866">Source</a> </span></div><pre class="rust item-decl"><code>pub trait ServerCommunication {
+    // Provided methods
+    fn <a href="#method.sync_collective" class="fn">sync_collective</a>(
+        &amp;mut self,
+        stream_id: <a class="struct" href="https://docs.rs/cubecl-environment/0.11.0-pre.4/x86_64-unknown-linux-gnu/cubecl_environment/stream/id/struct.StreamId.html" title="struct cubecl_environment::stream::id::StreamId">StreamId</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.comm_init" class="fn">comm_init</a>(
+        &amp;mut self,
+        device_ids: <a class="struct" href="../ir/prelude/struct.Vec.html" title="struct cubecl::ir::prelude::Vec">Vec</a>&lt;<a class="struct" href="../device/struct.DeviceId.html" title="struct cubecl::device::DeviceId">DeviceId</a>&gt;,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.all_reduce" class="fn">all_reduce</a>(
+        &amp;mut self,
+        src: <a class="struct" href="struct.BufferBinding.html" title="struct cubecl::server::BufferBinding">BufferBinding</a>,
+        dst: <a class="struct" href="struct.BufferBinding.html" title="struct cubecl::server::BufferBinding">BufferBinding</a>,
+        dtype: <a class="enum" href="../prelude/enum.ElemType.html" title="enum cubecl::prelude::ElemType">ElemType</a>,
+        stream_id: <a class="struct" href="https://docs.rs/cubecl-environment/0.11.0-pre.4/x86_64-unknown-linux-gnu/cubecl_environment/stream/id/struct.StreamId.html" title="struct cubecl_environment::stream::id::StreamId">StreamId</a>,
+        op: <a class="enum" href="enum.ReduceOperation.html" title="enum cubecl::server::ReduceOperation">ReduceOperation</a>,
+        device_ids: <a class="struct" href="../ir/prelude/struct.Vec.html" title="struct cubecl::ir::prelude::Vec">Vec</a>&lt;<a class="struct" href="../device/struct.DeviceId.html" title="struct cubecl::device::DeviceId">DeviceId</a>&gt;,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.send" class="fn">send</a>(
+        &amp;mut self,
+        desc: <a class="struct" href="struct.CopyDescriptor.html" title="struct cubecl::server::CopyDescriptor">CopyDescriptor</a>,
+        dtype: <a class="enum" href="../prelude/enum.ElemType.html" title="enum cubecl::prelude::ElemType">ElemType</a>,
+        stream_id: <a class="struct" href="https://docs.rs/cubecl-environment/0.11.0-pre.4/x86_64-unknown-linux-gnu/cubecl_environment/stream/id/struct.StreamId.html" title="struct cubecl_environment::stream::id::StreamId">StreamId</a>,
+        device_id_dst: <a class="struct" href="../device/struct.DeviceId.html" title="struct cubecl::device::DeviceId">DeviceId</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.recv" class="fn">recv</a>(
+        &amp;mut self,
+        handle: <a class="struct" href="struct.Handle.html" title="struct cubecl::server::Handle">Handle</a>,
+        dtype: <a class="enum" href="../prelude/enum.ElemType.html" title="enum cubecl::prelude::ElemType">ElemType</a>,
+        stream_id: <a class="struct" href="https://docs.rs/cubecl-environment/0.11.0-pre.4/x86_64-unknown-linux-gnu/cubecl_environment/stream/id/struct.StreamId.html" title="struct cubecl_environment::stream::id::StreamId">StreamId</a>,
+        device_id_src: <a class="struct" href="../device/struct.DeviceId.html" title="struct cubecl::device::DeviceId">DeviceId</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt; { ... }
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Defines functions for optimized data transfer between servers, supporting custom communication
+mechanisms such as peer-to-peer communication or specialized implementations.</p>
+<h2 id="inside-the-tainted-buffer-rules"><a class="doc-anchor" href="#inside-the-tainted-buffer-rules">§</a>Inside the tainted-buffer rules</h2>
+<p>A collective reads a source buffer and produces a destination one, and owes
+the same two answers the rest of the server gives: ask whether the source
+carries a failure on the way in (as <a href="trait.Server.html#tymethod.read" title="method cubecl::server::Server::read"><code>read</code></a> does
+through
+<code>FailureStore::ensure_written</code> in <code>cubecl-server</code>),
+and taint the destination on the way out when the operation fails (as a
+failed <a href="trait.Server.html#tymethod.launch" title="method cubecl::server::Server::launch"><code>launch</code></a> does). Skipping either lets a
+collective reduce stale bytes across every device in the group, or leave a
+destination that reads back clean when nothing wrote it.</p>
+<p>The default methods are for a runtime with no transport between its devices:
+each returns <a href="enum.ServerError.html#variant.NoDeviceTransport" title="variant cubecl::server::ServerError::NoDeviceTransport"><code>ServerError::NoDeviceTransport</code></a> before touching any buffer, so
+there is no destination to taint.</p>
+</div></details><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.sync_collective" class="method"><a class="src rightside" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/server/base.rs.html#881">Source</a><h4 class="code-header">fn <a href="#method.sync_collective" class="fn">sync_collective</a>(&amp;mut self, stream_id: <a class="struct" href="https://docs.rs/cubecl-environment/0.11.0-pre.4/x86_64-unknown-linux-gnu/cubecl_environment/stream/id/struct.StreamId.html" title="struct cubecl_environment::stream::id::StreamId">StreamId</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt;</h4></section></summary><div class="docblock"><p>Ensure that all queued collective operations have been executed.</p>
+<h5 id="arguments"><a class="doc-anchor" href="#arguments">§</a>Arguments</h5>
+<ul>
+<li><code>stream_id</code> - The <a href="https://docs.rs/cubecl-environment/0.11.0-pre.4/x86_64-unknown-linux-gnu/cubecl_environment/stream/id/struct.StreamId.html" title="struct cubecl_environment::stream::id::StreamId"><code>StreamId</code></a> of the stream waiting for the sync.</li>
+</ul>
+<h5 id="returns"><a class="doc-anchor" href="#returns">§</a>Returns</h5>
+<p>Returns a <code>Result</code> containing an <code>ServerError</code> if the operation fails.</p>
+<h5 id="errors"><a class="doc-anchor" href="#errors">§</a>Errors</h5>
+<p>The default returns <a href="enum.ServerError.html#variant.NoDeviceTransport" title="variant cubecl::server::ServerError::NoDeviceTransport"><code>ServerError::NoDeviceTransport</code></a>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.comm_init" class="method"><a class="src rightside" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/server/base.rs.html#899">Source</a><h4 class="code-header">fn <a href="#method.comm_init" class="fn">comm_init</a>(&amp;mut self, device_ids: <a class="struct" href="../ir/prelude/struct.Vec.html" title="struct cubecl::ir::prelude::Vec">Vec</a>&lt;<a class="struct" href="../device/struct.DeviceId.html" title="struct cubecl::device::DeviceId">DeviceId</a>&gt;) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt;</h4></section></summary><div class="docblock"><p>Initialize the communication between the devices in <code>device_ids</code>.</p>
+<h5 id="arguments-1"><a class="doc-anchor" href="#arguments-1">§</a>Arguments</h5>
+<ul>
+<li><code>device_ids</code> - The IDs of the devices that need communication.</li>
+</ul>
+<h5 id="returns-1"><a class="doc-anchor" href="#returns-1">§</a>Returns</h5>
+<p>Returns a <code>Result</code> containing an <code>ServerError</code> if the operation fails.</p>
+<h5 id="errors-1"><a class="doc-anchor" href="#errors-1">§</a>Errors</h5>
+<p>The default returns <a href="enum.ServerError.html#variant.NoDeviceTransport" title="variant cubecl::server::ServerError::NoDeviceTransport"><code>ServerError::NoDeviceTransport</code></a>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.all_reduce" class="method"><a class="src rightside" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/server/base.rs.html#923-931">Source</a><h4 class="code-header">fn <a href="#method.all_reduce" class="fn">all_reduce</a>(
+    &amp;mut self,
+    src: <a class="struct" href="struct.BufferBinding.html" title="struct cubecl::server::BufferBinding">BufferBinding</a>,
+    dst: <a class="struct" href="struct.BufferBinding.html" title="struct cubecl::server::BufferBinding">BufferBinding</a>,
+    dtype: <a class="enum" href="../prelude/enum.ElemType.html" title="enum cubecl::prelude::ElemType">ElemType</a>,
+    stream_id: <a class="struct" href="https://docs.rs/cubecl-environment/0.11.0-pre.4/x86_64-unknown-linux-gnu/cubecl_environment/stream/id/struct.StreamId.html" title="struct cubecl_environment::stream::id::StreamId">StreamId</a>,
+    op: <a class="enum" href="enum.ReduceOperation.html" title="enum cubecl::server::ReduceOperation">ReduceOperation</a>,
+    device_ids: <a class="struct" href="../ir/prelude/struct.Vec.html" title="struct cubecl::ir::prelude::Vec">Vec</a>&lt;<a class="struct" href="../device/struct.DeviceId.html" title="struct cubecl::device::DeviceId">DeviceId</a>&gt;,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt;</h4></section></summary><div class="docblock"><p>Performs an <code>all_reduce</code> operation on the input data and writes it to the output buffer.
+see <a href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html#allreduce">https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html#allreduce</a></p>
+<h5 id="arguments-2"><a class="doc-anchor" href="#arguments-2">§</a>Arguments</h5>
+<ul>
+<li><code>src</code> - The data to be reduced.</li>
+<li><code>dst</code> - Where to write the result.</li>
+<li><code>dtype</code> - The element type of the data being reduced</li>
+<li><code>stream_id</code> - The data’s stream id.</li>
+<li><code>op</code> - The reduce’s aggregation operation e.g. mean, sum, etc.</li>
+<li><code>device_ids</code> - The list of device ids from which to <code>all_reduce</code>.</li>
+</ul>
+<h5 id="returns-2"><a class="doc-anchor" href="#returns-2">§</a>Returns</h5>
+<p>Returns a <code>Result</code> containing an <code>ServerError</code> if the operation fails.</p>
+<h5 id="errors-2"><a class="doc-anchor" href="#errors-2">§</a>Errors</h5>
+<p>The default returns <a href="enum.ServerError.html#variant.NoDeviceTransport" title="variant cubecl::server::ServerError::NoDeviceTransport"><code>ServerError::NoDeviceTransport</code></a>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.send" class="method"><a class="src rightside" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/server/base.rs.html#962-968">Source</a><h4 class="code-header">fn <a href="#method.send" class="fn">send</a>(
+    &amp;mut self,
+    desc: <a class="struct" href="struct.CopyDescriptor.html" title="struct cubecl::server::CopyDescriptor">CopyDescriptor</a>,
+    dtype: <a class="enum" href="../prelude/enum.ElemType.html" title="enum cubecl::prelude::ElemType">ElemType</a>,
+    stream_id: <a class="struct" href="https://docs.rs/cubecl-environment/0.11.0-pre.4/x86_64-unknown-linux-gnu/cubecl_environment/stream/id/struct.StreamId.html" title="struct cubecl_environment::stream::id::StreamId">StreamId</a>,
+    device_id_dst: <a class="struct" href="../device/struct.DeviceId.html" title="struct cubecl::device::DeviceId">DeviceId</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt;</h4></section></summary><div class="docblock"><p>Sends data from this server to a destination server.</p>
+<h5 id="arguments-3"><a class="doc-anchor" href="#arguments-3">§</a>Arguments</h5>
+<ul>
+<li><code>desc</code> - A descriptor specifying the data to be sent, including shape, strides, and binding.</li>
+<li><code>dtype</code> - The element type of the data being sent.</li>
+<li><code>stream_id</code> - The stream ID associated with the server’s operation.</li>
+<li><code>device_id_dst</code> - ID of the device receiving the data.</li>
+</ul>
+<h5 id="returns-3"><a class="doc-anchor" href="#returns-3">§</a>Returns</h5>
+<p>Returns a <code>Result</code> containing an <code>ServerError</code> if the operation fails.</p>
+<h5 id="known-limitation"><a class="doc-anchor" href="#known-limitation">§</a>Known limitation</h5>
+<p>Send and recv are posted fire-and-forget on two devices and block for
+each other, so a send that refuses — a source whose writer failed,
+above all — leaves the peer’s already-posted recv waiting on its
+communication stream with no way to recall it from here. The refusal
+is still right: completing the send would launder stale bytes onto a
+handle that carries no claim on the other device. Cross-device
+failure propagation needs a design pass of its own.</p>
+<h5 id="errors-3"><a class="doc-anchor" href="#errors-3">§</a>Errors</h5>
+<p>The default returns <a href="enum.ServerError.html#variant.NoDeviceTransport" title="variant cubecl::server::ServerError::NoDeviceTransport"><code>ServerError::NoDeviceTransport</code></a>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.recv" class="method"><a class="src rightside" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/server/base.rs.html#989-995">Source</a><h4 class="code-header">fn <a href="#method.recv" class="fn">recv</a>(
+    &amp;mut self,
+    handle: <a class="struct" href="struct.Handle.html" title="struct cubecl::server::Handle">Handle</a>,
+    dtype: <a class="enum" href="../prelude/enum.ElemType.html" title="enum cubecl::prelude::ElemType">ElemType</a>,
+    stream_id: <a class="struct" href="https://docs.rs/cubecl-environment/0.11.0-pre.4/x86_64-unknown-linux-gnu/cubecl_environment/stream/id/struct.StreamId.html" title="struct cubecl_environment::stream::id::StreamId">StreamId</a>,
+    device_id_src: <a class="struct" href="../device/struct.DeviceId.html" title="struct cubecl::device::DeviceId">DeviceId</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="enum.ServerError.html" title="enum cubecl::server::ServerError">ServerError</a>&gt;</h4></section></summary><div class="docblock"><p>Receive data from another server.</p>
+<h5 id="arguments-4"><a class="doc-anchor" href="#arguments-4">§</a>Arguments</h5>
+<ul>
+<li><code>handle</code> - The handle in which the received data is written.</li>
+<li><code>dtype</code> - The element type of the data being sent.</li>
+<li><code>stream_id</code> - The stream ID associated with the server’s operation.</li>
+<li><code>device_id_src</code> - ID of the device sending the data.</li>
+</ul>
+<h5 id="returns-4"><a class="doc-anchor" href="#returns-4">§</a>Returns</h5>
+<p>Returns a <code>Result</code> containing an <code>ServerError</code> if the operation fails.</p>
+<h5 id="errors-4"><a class="doc-anchor" href="#errors-4">§</a>Errors</h5>
+<p>The default returns <a href="enum.ServerError.html#variant.NoDeviceTransport" title="variant cubecl::server::ServerError::NoDeviceTransport"><code>ServerError::NoDeviceTransport</code></a>.</p>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait <b>is</b> <a href="https://doc.rust-lang.org/nightly/reference/items/traits.html#dyn-compatibility">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety".</i></p></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"></div><script src="../../trait.impl/cubecl_runtime/server/base/trait.ServerCommunication.js" async></script></section></div></main></body></html>

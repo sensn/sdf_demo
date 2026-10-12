@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_FRAGMENTS","MAX_LOGICAL_DIMS"],"enum":["ExpressionError","MetadataError"],"fn":["calculate_matmul_output"],"macro":[["shape",1],["smallvec",1],["strides",1]],"mod":["errors","indexing","metadata","striding"],"struct":["Shape","SmallVec","Strides","Tiling"]};

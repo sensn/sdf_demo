@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":["ATTR_KEY_GIVEN_NAMES"],"struct":["BoolAttr","DictAttr","FPDoubleAttr","FPHalfAttr","FPSingleAttr","GivenNamesAttr","IdentifierAttr","IntegerAttr","IntegerAttrBitwidthErr","OperandSegmentSizesAttr","StringAttr","TypeAttr","UnitAttr","VecAttr"]};

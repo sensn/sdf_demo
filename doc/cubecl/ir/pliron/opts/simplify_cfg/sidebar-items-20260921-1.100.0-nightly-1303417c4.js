@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["merge_inside_block","merge_inside_op","merge_inside_region","remove_blocks_inside_block","remove_blocks_inside_op","remove_blocks_inside_region","simplify_cfg"],"struct":["SimplifyCFGPass"]};

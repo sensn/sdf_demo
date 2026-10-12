@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["find_ancestor_block_of_block_in_region","find_ancestor_block_of_op_in_region","find_ancestor_of_op_interface","find_ancestor_of_op_type","find_ancestor_op_of_op_in_block","find_ancestor_op_of_op_in_region","strictly_precedes_in_block"],"mod":["dominance","traversals","visualize","walkers"],"trait":["ControlFlowGraph","HasLabel"]};

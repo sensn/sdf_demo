@@ -1,0 +1,143 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Generate a type-erased, inline wrapper for a single value."><title>obfuscate in cubecl - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc macro"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">obfuscate</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">obfuscate</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#example" title="Example">Example</a></li><li><a href="#when-to-reach-for-this" title="When to reach for this">When to reach for this</a></li><li><a href="#syntax" title="Syntax">Syntax</a></li><li><a href="#generated-api" title="Generated API">Generated API</a></li><li><a href="#derives" title="Derives">Derives</a></li><li><a href="#storage-and-safety" title="Storage and safety">Storage and safety</a></li><li><a href="#why-a-macro" title="Why a macro?">Why a macro?</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate cubecl</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">cubecl</a></div><h1>Macro <span class="macro">obfuscate</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/cubecl-common/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_common/obfuscation.rs.html#149">Source</a> </span></div><pre class="rust item-decl"><code>macro_rules! obfuscate {
+    (
+        type: $inner:ty,
+        module: $mod_name:ident,
+        derives: [ $($trait:ident),* $(,)? ],
+        align: $align:literal $(,)?
+    ) =&gt; { ... };
+    (
+        type: $inner:ty,
+        module: $mod_name:ident,
+        derives: [ $($trait:ident),* $(,)? ] $(,)?
+    ) =&gt; { ... };
+    (
+        type: $inner:ty,
+        module: $mod_name:ident,
+        align: $align:literal $(,)?
+    ) =&gt; { ... };
+    (
+        type: $inner:ty,
+        module: $mod_name:ident $(,)?
+    ) =&gt; { ... };
+    (@impl
+        type: $inner:ty,
+        module: $mod_name:ident,
+        derives: [ $($trait:ident),* ],
+        align: $align:literal,
+        check: $check:ident $(,)?
+    ) =&gt; { ... };
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Generate a type-erased, inline wrapper for a single value.</p>
+<p>Expands into a private module containing an <code>Opaque</code> struct that
+stores one value of <code>type:</code> behind a fixed-shape representation that
+never names the inner type. Downstream crates that handle the wrapper
+never have to resolve the inner type, which breaks the transitive
+monomorphization chain and can visibly cut compile times for deeply
+generic types.</p>
+<h2 id="example"><a class="doc-anchor" href="#example">§</a>Example</h2>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>cubecl_common::obfuscate;
+
+<span class="attr">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">struct </span>Tensor { shape: Vec&lt;usize&gt;, data: Vec&lt;f32&gt; }
+
+<span class="macro">obfuscate!</span>(
+    <span class="kw">type</span>: Tensor,
+    module: tensor,
+    derives: [Send, Sync, Debug, PartialEq, Clone],
+    align: <span class="number">8</span>,
+);
+
+<span class="kw">let </span>t = tensor::Opaque::new(Tensor { shape: <span class="macro">vec!</span>[<span class="number">2</span>, <span class="number">2</span>], data: <span class="macro">vec!</span>[<span class="number">1.0</span>; <span class="number">4</span>] });
+<span class="kw">let </span>copy = t.clone();
+<span class="macro">assert_eq!</span>(t, copy);
+
+<span class="comment">// Recover the concrete type when you actually need its fields.
+</span><span class="kw">let </span>inner: Tensor = t.into_inner();
+<span class="macro">assert_eq!</span>(inner.shape, <span class="macro">vec!</span>[<span class="number">2</span>, <span class="number">2</span>]);</code></pre></div>
+<p>The macro call must sit at module scope (or crate root); it cannot be
+nested inside a function body, since the generated module’s <code>super</code>
+would not see locals.</p>
+<h2 id="when-to-reach-for-this"><a class="doc-anchor" href="#when-to-reach-for-this">§</a>When to reach for this</h2>
+<ul>
+<li>A type appears in many generic instantiations and shows up as a
+compile-time bottleneck.</li>
+<li>You can’t use <code>Box&lt;dyn Trait&gt;</code>: you need the concrete type back, or
+you want to avoid the heap.</li>
+<li>The wrapper’s API surface (<code>new</code> / <code>as_ref</code> / <code>as_mut</code> / <code>into_inner</code>)
+is enough for the boundary you’re crossing.</li>
+</ul>
+<h2 id="syntax"><a class="doc-anchor" href="#syntax">§</a>Syntax</h2><div class="example-wrap"><pre class="language-text"><code>obfuscate!(
+    type:    &lt;inner-type&gt;,
+    module:  &lt;module-name&gt;,
+    derives: [&lt;trait&gt;, ...],      // optional
+    align:   &lt;integer-literal&gt;,   // optional; default is 64
+);</code></pre></div>
+<p><code>type:</code> and <code>module:</code> are mandatory and must appear in that order.
+<code>derives:</code> and <code>align:</code> are both optional; if present, they must
+appear in the order shown above.</p>
+<p><code>derives:</code> controls which opt-in trait impls are emitted on
+<code>Opaque</code>. Omit the key entirely (or pass <code>[]</code>) for none.</p>
+<p><code>align:</code> has two modes:</p>
+<ul>
+<li><strong>Omitted (default).</strong> The wrapper is fixed at 64-byte alignment.
+The macro only verifies <code>align_of::&lt;inner&gt;() &lt;= 64</code>; over-aligned
+small types are wasted bytes but it always works.</li>
+<li><strong>Specified.</strong> The wrapper has exactly that alignment, and the
+macro asserts the literal equals
+<code>max(core::mem::align_of::&lt;inner&gt;(), core::mem::align_of::&lt;*mut ()&gt;())</code>.
+Wrong values are a <code>const</code> assertion failure at the call site.</li>
+</ul>
+<p>A literal is required because <code>#[repr(align(N))]</code> does not accept
+const expressions — the macro can’t substitute <code>align_of::&lt;inner&gt;()</code>
+for you.</p>
+<h2 id="generated-api"><a class="doc-anchor" href="#generated-api">§</a>Generated API</h2>
+<p>The macro emits a single struct, <code>Opaque</code>, with inherent methods
+scoped <code>pub(super)</code> — visible to the parent module of the generated
+wrapper and nowhere else:</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">impl </span>Opaque {
+    <span class="kw">fn </span>new(inner: Inner) -&gt; <span class="self">Self</span>;
+    <span class="kw">fn </span>as_ref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Inner;
+    <span class="kw">fn </span>as_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>Inner;
+    <span class="kw">fn </span>into_inner(<span class="self">self</span>) -&gt; Inner;
+}
+<span class="comment">// Plus a `Drop` impl that runs the inner's destructor exactly once.
+// `into_inner` suppresses this drop and returns the value instead.</span></code></pre></div>
+<p>Any extra trait impls listed in <code>derives:</code> are emitted alongside.</p>
+<h2 id="derives"><a class="doc-anchor" href="#derives">§</a>Derives</h2>
+<p>The wrapper is <code>!Send + !Sync</code> and has no extra trait impls by
+default. Opt in via the <code>derives:</code> list:</p>
+<div class="table"><table><thead><tr><th>Token</th><th>Kind</th><th>Behaviour</th></tr></thead><tbody>
+<tr><td><code>Send</code>, <code>Sync</code></td><td><code>unsafe impl</code></td><td>Caller asserts the inner type satisfies the marker. No bound check is emitted.</td></tr>
+<tr><td><code>Debug</code>, <code>Display</code></td><td>safe</td><td>Forwards the <code>Formatter</code> to the inner value — width/precision/alternate flags survive.</td></tr>
+<tr><td><code>PartialEq</code></td><td>safe</td><td><code>self.as_ref() == other.as_ref()</code></td></tr>
+<tr><td><code>Eq</code></td><td>safe marker</td><td>Pairs with <code>PartialEq</code>.</td></tr>
+<tr><td><code>Hash</code></td><td>safe</td><td>Hashes the inner value.</td></tr>
+<tr><td><code>Clone</code></td><td>safe</td><td>Deep clone via the inner’s <code>Clone</code>. Storage is independent.</td></tr>
+<tr><td><code>Default</code></td><td>safe</td><td>Constructs from <code>&lt;Inner as Default&gt;::default()</code>.</td></tr>
+</tbody></table>
+</div>
+<p>Any other identifier in <code>derives: [...]</code> is a compile error at the
+call site. All non-marker impls require the inner type to implement
+the trait — the impl is concrete (not generic), so the bound is
+checked at expansion.</p>
+<h2 id="storage-and-safety"><a class="doc-anchor" href="#storage-and-safety">§</a>Storage and safety</h2>
+<p>The wrapper holds the inner value inline — no allocation. Storage
+uses pointer-sized <a href="https://doc.rust-lang.org/nightly/core/mem/maybe_uninit/union.MaybeUninit.html" title="union core::mem::maybe_uninit::MaybeUninit"><code>MaybeUninit&lt;*mut ()&gt;</code></a>
+slots rather than bytes, so any pointers owned by the inner value
+retain their provenance through the round trip. A naive
+<code>[u8; size_of::&lt;T&gt;()]</code> buffer would strip pointer provenance on
+read, breaking under Miri / Tree Borrows for any inner type that
+owns an <code>Arc</code>, <code>Box</code>, or similar.</p>
+<p>The wrapper carries <code>#[repr(C, align(N))]</code>. <code>N</code> is either the
+caller-declared <code>align:</code> literal (asserted strictly against the
+required value) or <code>64</code> by default (asserted permissively against
+<code>align_of::&lt;inner&gt;() &lt;= 64</code>). Wrong values are a compile error
+rather than runtime UB.</p>
+<h2 id="why-a-macro"><a class="doc-anchor" href="#why-a-macro">§</a>Why a macro?</h2>
+<p><code>size_of::&lt;T&gt;()</code> and <code>align_of::&lt;T&gt;()</code> are usable in <code>const</code> position
+only for concrete types. Without the unstable
+<code>feature(generic_const_exprs)</code>, you cannot write
+<code>struct Wrapper&lt;T&gt; { bytes: [u8; size_of::&lt;T&gt;()] }</code> as a generic. The
+macro side-steps this by expanding a fresh, concrete wrapper per use
+site.</p>
+</div></details></section></div></main></body></html>

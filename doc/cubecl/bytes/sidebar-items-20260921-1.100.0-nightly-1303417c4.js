@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AccessError","AllocationError","AllocationProperty","SplitError","SplitPolicy","ViewError"],"struct":["AccessPolicy","Bytes","Reader","SharedAllocationController","Writer"],"trait":["AllocationController"]};

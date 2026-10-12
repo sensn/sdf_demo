@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["get_trait_casters"],"static":["TRAIT_CASTERS"]};

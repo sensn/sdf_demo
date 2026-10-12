@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["clone_blocks_into","clone_operation","clone_region_into"],"struct":["IrMapping"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["ptr_value_ty"],"trait":["BlockPtrExt","OperationPtrExt","RegionPtrExt"]};

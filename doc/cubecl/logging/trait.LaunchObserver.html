@@ -1,0 +1,85 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Notified of every kernel launch, on the thread that issued it."><title>LaunchObserver in cubecl::logging - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="/-/rustdoc.static/${f}">`).join(""))</script><link rel="stylesheet" href="/-/rustdoc.static/normalize-9960930a.css"><link rel="stylesheet" href="/-/rustdoc.static/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="/-/rustdoc.static/" data-current-crate="cubecl" data-themes="" data-resource-suffix="-20260921-1.100.0-nightly-1303417c4" data-rustdoc-version="1.100.0-nightly (1303417c4 2026-09-21)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="/-/rustdoc.static/storage-41dd4d93.js"></script><script defer src="sidebar-items-20260921-1.100.0-nightly-1303417c4.js"></script><script defer src="/-/rustdoc.static/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="/-/rustdoc.static/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="/-/rustdoc.static/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="/-/rustdoc.static/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">LaunchObserver</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../cubecl/index.html">cubecl</a><span class="version">0.11.0-pre.4</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Launch<wbr>Observer</a></h2><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.launched" title="launched">launched</a></li></ul><h3><a href="#provided-methods">Provided Methods</a></h3><ul class="block"><li><a href="#method.profiled" title="profiled">profiled</a></li><li><a href="#method.timed" title="timed">timed</a></li><li><a href="#method.timing" title="timing">timing</a></li></ul><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2><a href="index.html">In cubecl::<wbr>logging</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">cubecl</a>::<wbr><a href="index.html">logging</a></div><h1>Trait <span class="trait">Launch<wbr>Observer</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/logging/observer.rs.html#126">Source</a> </span></div><pre class="rust item-decl"><code>pub trait LaunchObserver: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> {
+    // Required method
+    fn <a href="#tymethod.launched" class="fn">launched</a>(&amp;self, kernel: &amp;'static <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>);
+
+    // Provided methods
+    fn <a href="#method.timing" class="fn">timing</a>(&amp;self) -&gt; <a class="enum" href="enum.TimingRequest.html" title="enum cubecl::logging::TimingRequest">TimingRequest</a> { ... }
+<span class="item-spacer"></span>    fn <a href="#method.profiled" class="fn">profiled</a>(&amp;self, _kernel: &amp;'static <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, _profile: <a class="struct" href="struct.ProfileDuration.html" title="struct cubecl::logging::ProfileDuration">ProfileDuration</a>) { ... }
+<span class="item-spacer"></span>    fn <a href="#method.timed" class="fn">timed</a>(
+        &amp;self,
+        _kernel: &amp;'static <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+        _duration: <a class="struct" href="struct.Duration.html" title="struct cubecl::logging::Duration">Duration</a>,
+        _method: <a class="enum" href="enum.TimingMethod.html" title="enum cubecl::logging::TimingMethod">TimingMethod</a>,
+    ) { ... }
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Notified of every kernel launch, on the thread that issued it.</p>
+<p>Implementations must be cheap, must not launch, and must not install or drop
+a <a href="struct.LaunchObservation.html" title="struct cubecl::logging::LaunchObservation"><code>LaunchObservation</code></a>: this runs inside the launch path, before the kernel
+reaches the server, and holds the lock that guards the installed observer.</p>
+</div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.launched" class="method"><a class="src rightside" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/logging/observer.rs.html#130">Source</a><h4 class="code-header">fn <a href="#tymethod.launched" class="fn">launched</a>(&amp;self, kernel: &amp;'static <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>)</h4></section></summary><div class="docblock"><p>A kernel was issued, named as the kernel names itself. Pass it through
+<a href="../config/fn.type_name_format.html" title="fn cubecl::config::type_name_format"><code>type_name_format</code></a> to shorten it the
+way the profiling logger does.</p>
+</div></details></div><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.timing" class="method"><a class="src rightside" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/logging/observer.rs.html#154">Source</a><h4 class="code-header">fn <a href="#method.timing" class="fn">timing</a>(&amp;self) -&gt; <a class="enum" href="enum.TimingRequest.html" title="enum cubecl::logging::TimingRequest">TimingRequest</a></h4></section></summary><div class="docblock"><p>Whether each launch should be timed, and which of
+<a href="trait.LaunchObserver.html#method.profiled" title="method cubecl::logging::LaunchObserver::profiled"><code>profiled</code></a> and <a href="trait.LaunchObserver.html#method.timed" title="method cubecl::logging::LaunchObserver::timed"><code>timed</code></a> its measurement
+reaches.</p>
+<p><strong><a href="enum.TimingRequest.html#variant.None" title="variant cubecl::logging::TimingRequest::None"><code>None</code></a> by default, because timing is not free.</strong>
+Bracketing a launch with profile markers costs the issuing thread a round
+trip to the server per kernel, and <a href="enum.TimingRequest.html#variant.Resolved" title="variant cubecl::logging::TimingRequest::Resolved"><code>Resolved</code></a>
+also blocks until the kernel has run, removing the overlap between
+kernels. An observer that only wants to know <em>which</em> kernels ran should
+leave this alone; one measuring where a pass spends its time wants
+<a href="enum.TimingRequest.html#variant.Deferred" title="variant cubecl::logging::TimingRequest::Deferred"><code>Deferred</code></a>.</p>
+<p>Two situations refuse the measurement without refusing the launch:</p>
+<ul>
+<li>A profile the server cannot take — a graph capture window refuses
+them on the spot. The kernel is still launched, still reported to
+<a href="trait.LaunchObserver.html#tymethod.launched" title="method cubecl::logging::LaunchObserver::launched"><code>launched</code></a>, and the measurement is skipped for it,
+with a warning in the log.</li>
+<li>Don’t ask for <a href="enum.TimingRequest.html#variant.Resolved" title="variant cubecl::logging::TimingRequest::Resolved"><code>Resolved</code></a> around <strong>collective</strong>
+kernels. Reading blocks until the kernel completes, and a collective
+completes only when its peers launch — a thread that issues more than
+one side of a collective deadlocks waiting for the first.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.profiled" class="method"><a class="src rightside" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/logging/observer.rs.html#179">Source</a><h4 class="code-header">fn <a href="#method.profiled" class="fn">profiled</a>(&amp;self, _kernel: &amp;'static <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, _profile: <a class="struct" href="struct.ProfileDuration.html" title="struct cubecl::logging::ProfileDuration">ProfileDuration</a>)</h4></section></summary><div class="docblock"><p>A kernel was timed, and this is its measurement — <strong>not yet read
+back</strong>. Keep it, and read it once the work being measured is over.</p>
+<p>Only called under <a href="enum.TimingRequest.html#variant.Deferred" title="variant cubecl::logging::TimingRequest::Deferred"><code>TimingRequest::Deferred</code></a>, on the thread that issued
+the launch, right after it. Where the backend times on the device
+without waiting — CUDA, HIP, and wgpu’s timestamp queries — the
+measurement is two events in the stream that nothing has waited for, and
+the resolved <a href="struct.ProfileTicks.html" title="struct cubecl::profile::ProfileTicks"><code>ProfileTicks</code></a> carry the window’s start and end on one
+clock, so an observer can also say where the device sat idle between
+kernels. Metal waits for the window and places it at the moment it was
+read: its lengths are device time, its starts and ends do not line up,
+and keeping the measurement saves nothing there.</p>
+<p>Called under the same lock as every other method here, so keeping the
+measurement must be cheap. Reading it — <a href="struct.ProfileDuration.html#method.resolve" title="method cubecl::logging::ProfileDuration::resolve"><code>ProfileDuration::resolve</code></a> —
+blocks until the device has reached both events, so doing that here
+would hold the lock for the length of the kernel, which is the thing
+<a href="enum.TimingRequest.html#variant.Deferred" title="variant cubecl::logging::TimingRequest::Deferred"><code>Deferred</code></a> exists to avoid.</p>
+<p>The default drops it: an observer declaring
+<a href="enum.TimingRequest.html#variant.Deferred" title="variant cubecl::logging::TimingRequest::Deferred"><code>Deferred</code></a> owes an implementation.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.timed" class="method"><a class="src rightside" href="https://docs.rs/cubecl-runtime/0.11.0-pre.4/x86_64-unknown-linux-gnu/src/cubecl_runtime/logging/observer.rs.html#204">Source</a><h4 class="code-header">fn <a href="#method.timed" class="fn">timed</a>(
+    &amp;self,
+    _kernel: &amp;'static <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+    _duration: <a class="struct" href="struct.Duration.html" title="struct cubecl::logging::Duration">Duration</a>,
+    _method: <a class="enum" href="enum.TimingMethod.html" title="enum cubecl::logging::TimingMethod">TimingMethod</a>,
+)</h4></section></summary><div class="docblock"><p>A kernel finished, and took this long.</p>
+<p>Called under <a href="enum.TimingRequest.html#variant.Resolved" title="variant cubecl::logging::TimingRequest::Resolved"><code>TimingRequest::Resolved</code></a> once the launch path has read the
+measurement — and under <a href="enum.TimingRequest.html#variant.Deferred" title="variant cubecl::logging::TimingRequest::Deferred"><code>TimingRequest::Deferred</code></a> too, in place of
+<a href="trait.LaunchObserver.html#method.profiled" title="method cubecl::logging::LaunchObserver::profiled"><code>profiled</code></a>, whenever the profiling logger is reading
+measurements as well. <strong>So an observer that asked to keep measurements
+unread still has to implement this</strong>, or it loses every timing whenever
+the logger is on.</p>
+<p>It arrives <em>after</em> the launch rather than before it, so an observer
+pairing kernels with its own state should do that in
+<a href="trait.LaunchObserver.html#tymethod.launched" title="method cubecl::logging::LaunchObserver::launched"><code>launched</code></a> and use this only for the duration. A
+duration goes to the observer the launch was reported to, and only while
+it is still installed: an observation that ends mid-read is not told.</p>
+<p><strong><code>method</code> is not a detail.</strong> A backend falls back to
+<a href="enum.TimingMethod.html#variant.System" title="variant cubecl::logging::TimingMethod::System"><code>System</code></a> where it cannot get a device
+timestamp — wgpu does exactly that once the timestamp-query budget is
+spent — and a system timing is host wall around a blocking submit,
+which includes submission, sync, and the kernel’s compilation on its
+first launch, rather than the kernel. The two are not the same
+measurement and an observer reporting them as one will show a number
+that moves several-fold between runs.</p>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait <b>is</b> <a href="https://doc.rust-lang.org/nightly/reference/items/traits.html#dyn-compatibility">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety".</i></p></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"></div><script src="../../trait.impl/cubecl_runtime/logging/observer/trait.LaunchObserver.js" async></script></section></div></main></body></html>

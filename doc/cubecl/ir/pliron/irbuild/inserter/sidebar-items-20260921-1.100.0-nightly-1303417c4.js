@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BlockInsertionPoint","OpInsertionPoint"],"struct":["IRInserter","ScopedInserter"],"trait":["Inserter"]};

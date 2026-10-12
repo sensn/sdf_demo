@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["get_context_registrations","get_dict_key_ids"],"static":["CONTEXT_REGISTRATIONS","DICT_KEY_IDS"],"struct":["ArenaIndex","AuxDataIndex","Context","DanglingPtrDerefError","Ptr"],"type":["Arena","ContextRegistration"]};

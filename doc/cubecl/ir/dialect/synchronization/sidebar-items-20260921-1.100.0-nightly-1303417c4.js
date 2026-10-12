@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SyncScope"],"struct":["SyncAsyncProxyOp","SyncOp","SyncScopeAttr"]};

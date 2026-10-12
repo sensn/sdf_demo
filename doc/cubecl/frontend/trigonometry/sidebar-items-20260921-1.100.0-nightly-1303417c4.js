@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["hypot","rhypot"],"mod":["hypot","rhypot"]};

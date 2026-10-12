@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EnqueueOrder"],"fn":["apply_match_rewrite"],"struct":["PassWrapper","RewriterOrder"],"trait":["MatchRewrite"],"type":["MatchRewriter"]};

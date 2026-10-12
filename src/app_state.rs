@@ -232,7 +232,11 @@ pub fn scene_data(&self) -> Vec<f32> {
         packed_data[r_base + 1] = *self.slot_rot_y.get(i).unwrap_or(&0.0f32);
         packed_data[r_base + 2] = *self.slot_rot_z.get(i).unwrap_or(&0.0f32);
     }
-
+    // 🟢 PLAN STEP 2/3: SDF-Statuen-Grid anhängen (64³ Voxel, ZYX-
+    // Reihenfolge). Wird einmal aus OBJ gebäckt (Cache: *.sdfcache)
+    // und reist im selben Mega-Buffer wie Slots/Materials/Rotationen.
+    let sdf_grid = crate::sdf_preprocessor::load_or_bake_sdf("assets/statue.obj");
+    packed_data.extend_from_slice(&sdf_grid);
     packed_data
 }
 

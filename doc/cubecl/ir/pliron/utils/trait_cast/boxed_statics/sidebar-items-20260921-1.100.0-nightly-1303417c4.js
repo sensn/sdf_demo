@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["get_boxed_trait_casters"],"static":["BOXED_TRAIT_CASTERS"]};

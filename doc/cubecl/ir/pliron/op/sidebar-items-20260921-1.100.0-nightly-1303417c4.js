@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CanonicalSyntaxParseError"],"fn":["canonical_syntax_parse","canonical_syntax_parser","canonical_syntax_print","op_cast","op_impls","op_impls_static","verify_op"],"static":["OP_INTERFACE_VERIFIERS"],"struct":["OpBox","OpId","OpName"],"trait":["Op","OpInterfaceMarker"],"type":["OpInterfaceAllVerifiers","OpInterfaceVerifier","OpObj"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["any_to_trait","boxed_any_to_trait","get_boxed_trait_casters","get_trait_casters","impls_trait_static"],"mod":["boxed_statics","statics"],"static":["BOXED_TRAIT_CASTERS","TRAIT_CASTERS"]};
