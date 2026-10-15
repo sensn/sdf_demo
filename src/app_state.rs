@@ -82,6 +82,31 @@ pub struct ApplicationState {
     // 🟢 TENSOR 6: Unendliche Raumfaltung (modulo grid)
     pub cell_size: f32,
     pub fold_speed: f32,
+
+    // 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
+    pub volumetric_fog_steps: u32,   // Nebel-Integrationsschritte (4..64)
+    pub fog_density_falloff: f32,   // Höhenprofil-Falloff (0.01..0.5)
+    pub ao_iterations: u32,        // AO-Sampling-Iterationen (1..10)
+    pub shadow_softness_k: f32,     // Weichheits-Konstante (1.0..64.0)
+
+    // 🟢 PARAM-GUI: Infinite Repetition (Fold-Tab)
+    pub pillar_spacing: f32,       // XZ-Wiederholungs-Abstand (2.0..20.0)
+    pub pillar_height: f32,        // Pfeilerhöhe (1.0..10.0)
+
+    // 🟢 PARAM-GUI: Materialien & Reflexionen (Mat-Tab)
+    pub reflection_max_steps: u32,     // Sekundär-Schritte (8..64)
+    pub reflection_roughness_gate: f32, // Aktivierungsschwelle (0.05..1.0)
+    pub fresnel_strength_factor: f32,  // Reflexions-Stärke (0.0..1.0)
+    pub statue_metallic: f32,          // Statue PBR (ID 2)
+    pub pillar_roughness: f32,         // Pfeiler PBR (ID 1)
+
+    // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
+    pub sdf_grid_size: f32,                 // Grid-Ausdehnung (1.0..16.0)
+    pub statue_center_x: f32,               // Statue-Zentrum X
+    pub statue_center_y: f32,               // Statue-Zentrum Y (default -1.4)
+    pub statue_center_z: f32,               // Statue-Zentrum Z
+    pub bounding_sphere_radius_offset: f32, // Proximity-Schranke (default 0.1)
+    pub mesh_scale_factor: f32,             // Mesh-Normalisierung (0.1..1.0, default 0.8)
 }
 
 impl Default for ApplicationState {
@@ -159,6 +184,31 @@ impl Default for ApplicationState {
             // 🟢 TENSOR 6: Raumfaltungs-Defaults
             cell_size: 10.0,
             fold_speed: 1.0,
+
+            // 🟢 PARAM-GUI: Atmosphäre & Lighting-Defaults
+            volumetric_fog_steps: 16,
+            fog_density_falloff: 0.08,
+            ao_iterations: 5,
+            shadow_softness_k: 8.0,
+
+            // 🟢 PARAM-GUI: Infinite Repetition-Defaults
+            pillar_spacing: 6.0,
+            pillar_height: 4.0,
+
+            // 🟢 PARAM-GUI: Materialien & Reflexionen-Defaults
+            reflection_max_steps: 32,
+            reflection_roughness_gate: 0.25,
+            fresnel_strength_factor: 0.35,
+            statue_metallic: 0.8,
+            pillar_roughness: 0.8,
+
+            // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration-Defaults
+            sdf_grid_size: 4.0,
+            statue_center_x: 0.0,
+            statue_center_y: -1.4,
+            statue_center_z: 0.0,
+            bounding_sphere_radius_offset: 0.1,
+            mesh_scale_factor: 0.8,
         }
     }
 }
@@ -235,7 +285,8 @@ pub fn scene_data(&self) -> Vec<f32> {
     // 🟢 PLAN STEP 2/3: SDF-Statuen-Grid anhängen (64³ Voxel, ZYX-
     // Reihenfolge). Wird einmal aus OBJ gebäckt (Cache: *.sdfcache)
     // und reist im selben Mega-Buffer wie Slots/Materials/Rotationen.
-    let sdf_grid = crate::sdf_preprocessor::load_or_bake_sdf("assets/statue.obj");
+    // 🟢 PARAM-GUI: mesh_scale_factor fließt in den Bake ein (default 0.8).
+    let sdf_grid = crate::sdf_preprocessor::load_or_bake_sdf("assets/statue.obj", self.mesh_scale_factor);
     packed_data.extend_from_slice(&sdf_grid);
     packed_data
 }
@@ -266,6 +317,11 @@ pub fn scene_data(&self) -> Vec<f32> {
             },
             fog_density: self.fog_density,
             fog_enabled: self.fog_enabled,
+            // 🟢 PARAM-GUI: Atmosphäre & Lighting
+            volumetric_fog_steps: self.volumetric_fog_steps,
+            fog_density_falloff: self.fog_density_falloff,
+            ao_iterations: self.ao_iterations,
+            shadow_softness_k: self.shadow_softness_k,
         }
     }
 
@@ -290,6 +346,9 @@ pub fn scene_data(&self) -> Vec<f32> {
             cell_size: self.cell_size,
             half_cell: self.cell_size * 0.5,
             fold_speed: self.fold_speed,
+            // 🟢 PARAM-GUI: Infinite Repetition
+            pillar_spacing: self.pillar_spacing,
+            pillar_height: self.pillar_height,
         }
     }
 
@@ -307,6 +366,21 @@ pub fn scene_data(&self) -> Vec<f32> {
             enable_key: self.enable_key,
             enable_fill: self.enable_fill,
             enable_rim: self.enable_rim,
+            // 🟢 PARAM-GUI: Materialien & Reflexionen
+            reflection_max_steps: self.reflection_max_steps,
+            reflection_roughness_gate: self.reflection_roughness_gate,
+            fresnel_strength_factor: self.fresnel_strength_factor,
+            statue_metallic: self.statue_metallic,
+            pillar_roughness: self.pillar_roughness,
+            // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration
+            sdf_grid_size: self.sdf_grid_size,
+            statue_center: GpuVec3Launch {
+                x: self.statue_center_x,
+                y: self.statue_center_y,
+                z: self.statue_center_z,
+                _pad: 0.0,
+            },
+            bounding_sphere_radius_offset: self.bounding_sphere_radius_offset,
         }
     }
 

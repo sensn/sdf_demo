@@ -28,7 +28,7 @@ pub(in crate::gui) fn arch_tab(
         .multiple(true)
         .on_toggle_click(move |open_ix: &[usize], _win, cx| {
             acc_state.update(cx, |st, cx| {
-                st.arch_open = (0..3).map(|i| open_ix.contains(&i)).collect();
+                st.arch_open = (0..4).map(|i| open_ix.contains(&i)).collect();
                 cx.notify();
             });
         })
@@ -57,6 +57,14 @@ pub(in crate::gui) fn arch_tab(
                 slider_row("Decor Frequency", &gui.decor_freq_slider, s.decor_freq).into_any_element(),
                 slider_row("Decor Depth", &gui.decor_depth_slider, s.decor_depth).into_any_element(),
                 slider_row("Decor Thickness", &gui.decor_thick_slider, s.decor_thick).into_any_element(),
+            ],
+        ))
+        // 🟢 PARAM-GUI Step 3: Global Grid
+        .item(acc_item(
+            "Global Grid",
+            open[3],
+            vec![
+                slider_row("Cell Size", &gui.cell_size_slider, s.cell_size).into_any_element(),
             ],
         ))
 }

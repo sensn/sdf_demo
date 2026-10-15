@@ -118,6 +118,28 @@ pub struct GuiState {
     pub obj_rot_y_slider: Entity<SliderState>,
     pub obj_rot_z_slider: Entity<SliderState>,
 
+    // 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
+    pub volumetric_fog_steps_slider: Entity<SliderState>,
+    pub fog_density_falloff_slider: Entity<SliderState>,
+    pub ao_iterations_slider: Entity<SliderState>,
+    pub shadow_softness_k_slider: Entity<SliderState>,
+    // 🟢 PARAM-GUI: Infinite Repetition (Fold-Tab)
+    pub pillar_spacing_slider: Entity<SliderState>,
+    pub pillar_height_slider: Entity<SliderState>,
+    // 🟢 PARAM-GUI: Materialien & Reflexionen (Mat-Tab)
+    pub reflection_max_steps_slider: Entity<SliderState>,
+    pub reflection_roughness_gate_slider: Entity<SliderState>,
+    pub fresnel_strength_factor_slider: Entity<SliderState>,
+    pub statue_metallic_slider: Entity<SliderState>,
+    pub pillar_roughness_slider: Entity<SliderState>,
+    // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
+    pub sdf_grid_size_slider: Entity<SliderState>,
+    pub mesh_scale_factor_slider: Entity<SliderState>,
+    pub statue_center_x_slider: Entity<SliderState>,
+    pub statue_center_y_slider: Entity<SliderState>,
+    pub statue_center_z_slider: Entity<SliderState>,
+    pub bounding_sphere_radius_offset_slider: Entity<SliderState>,
+
     /// UI-Zustand
     pub tab_state: Entity<TabState>,
     pub accordion_state: Entity<AccordionUiState>,
@@ -204,6 +226,45 @@ impl GuiState {
         let obj_rot_z_slider =
             cx.new(|_| SliderState::new().min(0.0).max(6.283).step(0.01).default_value(0.0));
 
+        // --- 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
+        let volumetric_fog_steps_slider =
+            cx.new(|_| SliderState::new().min(4.0).max(64.0).step(1.0).default_value(16.0));
+        let fog_density_falloff_slider =
+            cx.new(|_| SliderState::new().min(0.01).max(0.5).step(0.01).default_value(0.08));
+        let ao_iterations_slider =
+            cx.new(|_| SliderState::new().min(1.0).max(10.0).step(1.0).default_value(5.0));
+        let shadow_softness_k_slider =
+            cx.new(|_| SliderState::new().min(1.0).max(64.0).step(0.5).default_value(8.0));
+        // --- 🟢 PARAM-GUI: Infinite Repetition (Fold-Tab)
+        let pillar_spacing_slider =
+            cx.new(|_| SliderState::new().min(2.0).max(20.0).step(0.1).default_value(6.0));
+        let pillar_height_slider =
+            cx.new(|_| SliderState::new().min(1.0).max(10.0).step(0.1).default_value(4.0));
+        // --- 🟢 PARAM-GUI: Materialien & Reflexionen (Mat-Tab)
+        let reflection_max_steps_slider =
+            cx.new(|_| SliderState::new().min(8.0).max(64.0).step(1.0).default_value(32.0));
+        let reflection_roughness_gate_slider =
+            cx.new(|_| SliderState::new().min(0.05).max(1.0).step(0.01).default_value(0.25));
+        let fresnel_strength_factor_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.35));
+        let statue_metallic_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.8));
+        let pillar_roughness_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.8));
+        // --- 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
+        let sdf_grid_size_slider =
+            cx.new(|_| SliderState::new().min(1.0).max(16.0).step(0.1).default_value(4.0));
+        let mesh_scale_factor_slider =
+            cx.new(|_| SliderState::new().min(0.1).max(1.0).step(0.01).default_value(0.8));
+        let statue_center_x_slider =
+            cx.new(|_| SliderState::new().min(-10.0).max(10.0).step(0.1).default_value(0.0));
+        let statue_center_y_slider =
+            cx.new(|_| SliderState::new().min(-5.0).max(5.0).step(0.1).default_value(-1.4));
+        let statue_center_z_slider =
+            cx.new(|_| SliderState::new().min(-10.0).max(10.0).step(0.1).default_value(0.0));
+        let bounding_sphere_radius_offset_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.1));
+
         // --- Subscriptions (Slider -> ApplicationState)
         subscribe_slider(cx, &light_intensity_slider, state, |s, v| s.light_intensity = v);
         subscribe_slider(cx, &ambient_strength_slider, state, |s, v| s.ambient_strength = v);
@@ -279,13 +340,69 @@ impl GuiState {
             if i < s.slot_rot_z.len() { s.slot_rot_z[i] = v; }
         });
 
+        // --- 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
+        subscribe_slider(cx, &volumetric_fog_steps_slider, state, |s, v| {
+            s.volumetric_fog_steps = v as u32;
+        });
+        subscribe_slider(cx, &fog_density_falloff_slider, state, |s, v| {
+            s.fog_density_falloff = v;
+        });
+        subscribe_slider(cx, &ao_iterations_slider, state, |s, v| {
+            s.ao_iterations = v as u32;
+        });
+        subscribe_slider(cx, &shadow_softness_k_slider, state, |s, v| {
+            s.shadow_softness_k = v;
+        });
+        // --- 🟢 PARAM-GUI: Infinite Repetition (Fold-Tab)
+        subscribe_slider(cx, &pillar_spacing_slider, state, |s, v| {
+            s.pillar_spacing = v;
+        });
+        subscribe_slider(cx, &pillar_height_slider, state, |s, v| {
+            s.pillar_height = v;
+        });
+        // --- 🟢 PARAM-GUI: Materialien & Reflexionen (Mat-Tab)
+        subscribe_slider(cx, &reflection_max_steps_slider, state, |s, v| {
+            s.reflection_max_steps = v as u32;
+        });
+        subscribe_slider(cx, &reflection_roughness_gate_slider, state, |s, v| {
+            s.reflection_roughness_gate = v;
+        });
+        subscribe_slider(cx, &fresnel_strength_factor_slider, state, |s, v| {
+            s.fresnel_strength_factor = v;
+        });
+        subscribe_slider(cx, &statue_metallic_slider, state, |s, v| {
+            s.statue_metallic = v;
+        });
+        subscribe_slider(cx, &pillar_roughness_slider, state, |s, v| {
+            s.pillar_roughness = v;
+        });
+        // --- 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
+        subscribe_slider(cx, &sdf_grid_size_slider, state, |s, v| {
+            s.sdf_grid_size = v;
+        });
+        subscribe_slider(cx, &mesh_scale_factor_slider, state, |s, v| {
+            s.mesh_scale_factor = v;
+        });
+        subscribe_slider(cx, &statue_center_x_slider, state, |s, v| {
+            s.statue_center_x = v;
+        });
+        subscribe_slider(cx, &statue_center_y_slider, state, |s, v| {
+            s.statue_center_y = v;
+        });
+        subscribe_slider(cx, &statue_center_z_slider, state, |s, v| {
+            s.statue_center_z = v;
+        });
+        subscribe_slider(cx, &bounding_sphere_radius_offset_slider, state, |s, v| {
+            s.bounding_sphere_radius_offset = v;
+        });
+
         // --- UI-Zustand: Tab 0 (Env) aktiv, erste Accordion-Gruppe offen
         let tab_state = cx.new(|_| TabState {
             active: GuiTab::Environment,
         });
         let accordion_state = cx.new(|_| AccordionUiState {
-            env_open: vec![true, false, false],
-            arch_open: vec![true, false, false],
+            env_open: vec![true, false, false, false, false],
+            arch_open: vec![true, false, false, false],
         });
 
         Self {
@@ -323,6 +440,23 @@ impl GuiState {
             obj_rot_x_slider,
             obj_rot_y_slider,
             obj_rot_z_slider,
+            volumetric_fog_steps_slider,
+            fog_density_falloff_slider,
+            ao_iterations_slider,
+            shadow_softness_k_slider,
+            pillar_spacing_slider,
+            pillar_height_slider,
+            reflection_max_steps_slider,
+            reflection_roughness_gate_slider,
+            fresnel_strength_factor_slider,
+            statue_metallic_slider,
+            pillar_roughness_slider,
+            sdf_grid_size_slider,
+            mesh_scale_factor_slider,
+            statue_center_x_slider,
+            statue_center_y_slider,
+            statue_center_z_slider,
+            bounding_sphere_radius_offset_slider,
             tab_state,
             accordion_state,
         }
@@ -375,5 +509,27 @@ impl GuiState {
             sync_one(&self.obj_rot_y_slider, state.slot_rot_y[sel], window, cx);
             sync_one(&self.obj_rot_z_slider, state.slot_rot_z[sel], window, cx);
         }
+
+        // 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
+        sync_one(&self.volumetric_fog_steps_slider, state.volumetric_fog_steps as f32, window, cx);
+        sync_one(&self.fog_density_falloff_slider, state.fog_density_falloff, window, cx);
+        sync_one(&self.ao_iterations_slider, state.ao_iterations as f32, window, cx);
+        sync_one(&self.shadow_softness_k_slider, state.shadow_softness_k, window, cx);
+        // 🟢 PARAM-GUI: Infinite Repetition (Fold-Tab)
+        sync_one(&self.pillar_spacing_slider, state.pillar_spacing, window, cx);
+        sync_one(&self.pillar_height_slider, state.pillar_height, window, cx);
+        // 🟢 PARAM-GUI: Materialien & Reflexionen (Mat-Tab)
+        sync_one(&self.reflection_max_steps_slider, state.reflection_max_steps as f32, window, cx);
+        sync_one(&self.reflection_roughness_gate_slider, state.reflection_roughness_gate, window, cx);
+        sync_one(&self.fresnel_strength_factor_slider, state.fresnel_strength_factor, window, cx);
+        sync_one(&self.statue_metallic_slider, state.statue_metallic, window, cx);
+        sync_one(&self.pillar_roughness_slider, state.pillar_roughness, window, cx);
+        // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
+        sync_one(&self.sdf_grid_size_slider, state.sdf_grid_size, window, cx);
+        sync_one(&self.mesh_scale_factor_slider, state.mesh_scale_factor, window, cx);
+        sync_one(&self.statue_center_x_slider, state.statue_center_x, window, cx);
+        sync_one(&self.statue_center_y_slider, state.statue_center_y, window, cx);
+        sync_one(&self.statue_center_z_slider, state.statue_center_z, window, cx);
+        sync_one(&self.bounding_sphere_radius_offset_slider, state.bounding_sphere_radius_offset, window, cx);
     }
 }

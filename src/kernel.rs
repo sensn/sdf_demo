@@ -7,7 +7,6 @@ use cubecl::prelude::*;
 use crate::gpu::{MAX_SLOTS, SLOTS_COUNT, MATERIALS_COUNT, ROTATIONS_COUNT};
 // 🟢 PLAN STEP 3: SDF-Grid-Konstanten (gpu.rs + sdf_preprocessor.rs)
 use crate::gpu::{SDF_GRID_COUNT, SDF_GRID_RES};
-use crate::sdf_preprocessor::{SDF_GRID_SIZE, STATUE_CENTER};
 
 
 #[derive(Copy, Clone, CubeType)]
@@ -204,6 +203,11 @@ pub struct EnvSettings {
     pub bg_color: GpuVec3,      // war env[8..10]
     pub fog_density: f32,       // war env[11]
     pub fog_enabled: u32,       // war env[12] (f32) -> params3: u32-Flag 0/1
+    // 🟢 PARAM-GUI: Atmosphäre & Lighting
+    pub volumetric_fog_steps: u32, // Nebel-Integrationsschritte (4..64, default 16)
+    pub fog_density_falloff: f32,  // Höhenprofil-Falloff (0.01..0.5, default 0.08)
+    pub ao_iterations: u32,        // AO-Sampling-Iterationen (1..10, default 5)
+    pub shadow_softness_k: f32,     // Weichheits-Konstante (1.0..64.0, default 8.0)
 }
 
 /// Tempel-Architektur (ersetzt Tensor 5 / arch_data()[12]).
@@ -228,6 +232,9 @@ pub struct FoldParams {
     pub cell_size: f32,  // war fold[0]
     pub half_cell: f32,  // war fold[1]
     pub fold_speed: f32, // war fold[2]
+    // 🟢 PARAM-GUI: Infinite Repetition (Pfeiler-Faltung)
+    pub pillar_spacing: f32, // XZ-Wiederholungs-Abstand (2.0..20.0, default 6.0)
+    pub pillar_height: f32,   // Pfeilerhöhe (1.0..10.0, default 4.0)
 }
 
 /// Frame-Parameter & Mode-Flags (ersetzt Meta-Tensor + 12 lose Skalare).
@@ -244,6 +251,16 @@ pub struct RenderSettings {
     pub enable_key: u32,
     pub enable_fill: u32,
     pub enable_rim: u32,
+    // 🟢 PARAM-GUI: Materialien & Reflexionen
+    pub reflection_max_steps: u32,   // Sekundär-Schritte (8..64, default 32)
+    pub reflection_roughness_gate: f32, // Aktivierungsschwelle (0.05..1.0, default 0.25)
+    pub fresnel_strength_factor: f32,  // Reflexions-Stärke (0.0..1.0, default 0.35)
+    pub statue_metallic: f32,          // Statue PBR (ID 2), default 0.8
+    pub pillar_roughness: f32,         // Pfeiler PBR (ID 1), default 0.8
+    // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration
+    pub sdf_grid_size: f32,             // Grid-Ausdehnung (1.0..16.0, default 4.0)
+    pub statue_center: GpuVec3,         // Statue-Zentrum (default [0, -1.4, 0])
+    pub bounding_sphere_radius_offset: f32, // Proximity-Schranke (default 0.1)
 }
 
 #[cube]
@@ -621,6 +638,8 @@ pub fn scene_map_with_material(
     grid_res: u32,
     grid_size: f32,
     use_sphere_bound: bool,
+    statue_center: GpuVec3,
+    bounding_sphere_radius_offset: f32,
 ) -> Vec2 {
     let mut d_scene = f32::new(1000.0);
     let mut mat_id = f32::new(2.0);
@@ -632,14 +651,14 @@ pub fn scene_map_with_material(
     // `use_sphere_bound`: Primär-March JA (sicheres Stepping), Schatten/
     // AO NEIN (sonst wirft die unsichtbare Kugel einen Phantom-Schatten
     // — dunkler Ring um die Statue).
-    let statue_center = Vec3::new(
-        f32::new(STATUE_CENTER[0]),
-        f32::new(STATUE_CENTER[1]),
-        f32::new(STATUE_CENTER[2]),
+    let statue_center_v = Vec3::new(
+        statue_center.x,
+        statue_center.y,
+        statue_center.z,
     );
-    let statue_pos = p.sub(statue_center);
+    let statue_pos = p.sub(statue_center_v);
     let sphere_d = statue_pos.length() - grid_size * f32::new(0.5);
-    if sphere_d < f32::new(0.1) {
+    if sphere_d < bounding_sphere_radius_offset {
         let d_statue = sample_sdf_grid(statue_pos, grid, grid_res, grid_size);
         if d_statue < d_scene {
             d_scene = d_statue;
@@ -664,11 +683,13 @@ pub fn calculate_normal(
     grid: &[f32],
     grid_res: u32,
     grid_size: f32,
+    statue_center: GpuVec3,
+    bounding_sphere_radius_offset: f32,
 ) -> Vec3 {
     let eps = f32::new(0.001);
     // Normalen brauchen die reale Distanz (kein Sphere-Bound — sonst
     // gäbe es an der unsichtbaren Kugelgrenze falsche Normalen).
-    let d = scene_map_with_material(p.clone(), spacing, pillar_height, grid, grid_res, grid_size, false)
+    let d = scene_map_with_material(p.clone(), spacing, pillar_height, grid, grid_res, grid_size, false, statue_center, bounding_sphere_radius_offset)
         .d;
     let nx = scene_map_with_material(
         Vec3::new(p.x + eps, p.y, p.z),
@@ -678,6 +699,8 @@ pub fn calculate_normal(
         grid_res,
         grid_size,
         false,
+        statue_center,
+        bounding_sphere_radius_offset,
     )
     .d - d;
     let ny = scene_map_with_material(
@@ -688,6 +711,8 @@ pub fn calculate_normal(
         grid_res,
         grid_size,
         false,
+        statue_center,
+        bounding_sphere_radius_offset,
     )
     .d - d;
     let nz = scene_map_with_material(
@@ -698,6 +723,8 @@ pub fn calculate_normal(
         grid_res,
         grid_size,
         false,
+        statue_center,
+        bounding_sphere_radius_offset,
     )
     .d - d;
     Vec3::new(nx, ny, nz).normalize()
@@ -713,6 +740,7 @@ pub fn integrate_volumetric_fog(
     max_dist: f32,
     fog_density: f32,
     steps: u32,
+    fog_density_falloff: f32,
 ) -> f32 {
     let march_dist = hit_dist.min(max_dist);
     
@@ -736,7 +764,7 @@ pub fn integrate_volumetric_fog(
             let pos = ro.add(rd.scale(t));
 
             // Höhenprofil
-            let height_falloff = (f32::new(1.0) - pos.y * f32::new(0.08)).max(f32::new(0.1));
+            let height_falloff = (f32::new(1.0) - pos.y * fog_density_falloff).max(f32::new(0.1));
             let density = fog_density * height_falloff;
 
             // Optische Tiefe aufsummieren
@@ -782,6 +810,9 @@ pub fn trace_reflection(
     grid_size: f32,
     bg_color: Vec3,
     max_dist: f32,
+    reflection_max_steps: u32,
+    statue_center: GpuVec3,
+    bounding_sphere_radius_offset: f32,
 ) -> Vec3 {
     let mut t = f32::new(0.02);
     let mut hit_dist = max_dist;
@@ -791,7 +822,7 @@ pub fn trace_reflection(
     let mut hit_g = bg_color.y;
     let mut hit_b = bg_color.z;
     loop {
-        if i >= u32::new(32) {
+        if i >= reflection_max_steps {
             break;
         }
         let p = ro.add(rd.scale(t));
@@ -804,7 +835,7 @@ pub fn trace_reflection(
         let mut b = sdf_res.b;
         // … plus Statue (ohne Sphere-Bound — sonst Phantom-Reflexionen).
         let plan_res = scene_map_with_material(
-            p.clone(), f32::new(0.0), f32::new(0.0), sdf_grid, grid_res, grid_size, false,
+            p.clone(), f32::new(0.0), f32::new(0.0), sdf_grid, grid_res, grid_size, false, statue_center, bounding_sphere_radius_offset,
         );
         if plan_res.d < d {
             d = plan_res.d;
@@ -839,12 +870,12 @@ pub fn trace_reflection(
         // Normale über die Map, die den Treffer geliefert hat.
         let sdf_n = scene_sdf_normal(p.clone(), time, blend_factor, active_slots, slots, materials,
           rotations, arch, fold);
-        let plan_n = calculate_normal(p.clone(), f32::new(0.0), f32::new(0.0), sdf_grid, grid_res, grid_size);
+        let plan_n = calculate_normal(p.clone(), f32::new(0.0), f32::new(0.0), sdf_grid, grid_res, grid_size, statue_center, bounding_sphere_radius_offset);
         // Wähle per Distanz-Vergleich (keine if-else-Expr für Structs).
         let sdf_d = scene_sdf(p.clone(), time, blend_factor, active_slots, slots, materials,
           rotations, arch, fold).d;
         let plan_d = scene_map_with_material(
-            p.clone(), f32::new(0.0), f32::new(0.0), sdf_grid, grid_res, grid_size, false,
+            p.clone(), f32::new(0.0), f32::new(0.0), sdf_grid, grid_res, grid_size, false, statue_center, bounding_sphere_radius_offset,
         ).d;
         let use_plan = plan_d < sdf_d;
         n_x = select(use_plan, plan_n.x, sdf_n.x);
@@ -881,6 +912,9 @@ pub fn calculate_soft_shadow(
     sdf_grid: &[f32],
     grid_res: u32,
     grid_size: f32,
+    statue_center: GpuVec3,
+    bounding_sphere_radius_offset: f32,
+    shadow_softness_k: f32,
 ) -> f32 {
     let mut res = f32::new(1.0);
     let mut t = f32::new(0.04);
@@ -903,7 +937,7 @@ pub fn calculate_soft_shadow(
         // 🟢 PLAN STEP 7: Statue blockiert den Schattenstrahl ebenfalls
         // (KEIN Sphere-Bound — sonst Phantom-Schatten-Ring um die Statue).
         let plan_res = scene_map_with_material(
-            p.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size, false,
+            p.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size, false, statue_center, bounding_sphere_radius_offset,
         );
         if plan_res.d < h {
             h = plan_res.d;
@@ -914,7 +948,7 @@ pub fn calculate_soft_shadow(
             break;
         }
         
-        res = res.min(f32::new(8.0) * h / t);
+        res = res.min(shadow_softness_k * h / t);
         
         // 🟢 MASSIVER FPS-BOOST: Early Exit im Kernschatten
         // Wenn es bereits fast komplett schwarz ist, rechenintensiven Strahl stoppen!
@@ -954,19 +988,29 @@ pub fn calculate_ao(
     sdf_grid: &[f32],
     grid_res: u32,
     grid_size: f32,
+    statue_center: GpuVec3,
+    bounding_sphere_radius_offset: f32,
+    ao_iterations: u32,
 ) -> f32 {
     let mut occ = f32::new(0.0);
     let mut sca = f32::new(1.0);
 
     // 🟢 OPTIMIERUNG 2: Schleife komplett entrollen
     // Schaltet jeglichen Branch-Overhead für die AO-Berechnung aus
-    #[unroll]
-    for i in 1..5 {
+    // 🟢 PARAM-GUI: Iterationszahl datengetrieben (1..10, default 5).
+    let ao_iter_f = f32::cast_from(ao_iterations).max(f32::new(1.0));
+    let mut i = f32::new(0.0);
+    loop {
+        if i >= ao_iter_f {
+            break;
+        }
+        i += f32::new(1.0);
+
         let current_p = p.clone();
         let current_normal = normal.clone();
 
-        // i als f32 berechnen
-        let hr = f32::new(i as f32) * f32::new(0.15);
+        // i als f32 berechnen (1-basiert wie das alte `for i in 1..5`)
+        let hr = (i + f32::new(1.0)) * f32::new(0.15);
         let ao_pos = current_p.add(current_normal.scale(hr));
 
         let sdf_res = scene_sdf(ao_pos, time, blend_factor, active_slots, slots, materials,
@@ -974,7 +1018,7 @@ pub fn calculate_ao(
         let mut dd = sdf_res.d;
         // 🟢 PLAN STEP 7: Statue trägt zur Okklusion bei (kein Sphere-Bound).
         let plan_res = scene_map_with_material(
-            ao_pos.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size, false,
+            ao_pos.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size, false, statue_center, bounding_sphere_radius_offset,
         );
         if plan_res.d < dd {
             dd = plan_res.d;
@@ -1131,10 +1175,15 @@ pub fn raymarch_sdf_kernel(
     let sdf_grid = &scene[SDF_GRID_START..SDF_GRID_END];
     // Grid-Parameter (müssen zu sdf_preprocessor.rs passen).
     let grid_res = u32::cast_from(SDF_GRID_RES);
-    let grid_size = f32::new(SDF_GRID_SIZE);
+    // 🟢 PARAM-GUI: Grid-Größe datengetrieben (default 4.0).
+    let grid_size = render.sdf_grid_size;
     // Plan-Parameter: Pfeiler-Faltung + Statuen-Platzierung.
-    let pillar_spacing = f32::new(6.0);
-    let pillar_height = f32::new(4.0);
+    // 🟢 PARAM-GUI: aus FoldParams (datengetrieben statt hardcoded).
+    let pillar_spacing = fold.pillar_spacing;
+    let pillar_height = fold.pillar_height;
+    // 🟢 PARAM-GUI: Statue-Zentrum + Bounding-Offset aus RenderSettings.
+    let statue_center = render.statue_center;
+    let bounding_sphere_radius_offset = render.bounding_sphere_radius_offset;
 //
     if x < w_val && y < h_val {
     
@@ -1241,6 +1290,7 @@ pub fn raymarch_sdf_kernel(
             // der Primär-March braucht die sichere Schritt-Schranke.
             let plan_res = scene_map_with_material(
                 p.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size, true,
+                statue_center, bounding_sphere_radius_offset,
             );
             if plan_res.d < hit_d {
                 hit_d = plan_res.d;
@@ -1251,8 +1301,8 @@ pub fn raymarch_sdf_kernel(
                 hit_r = select(is_statue, f32::new(0.85), f32::new(0.55));
                 hit_g = select(is_statue, f32::new(0.7), f32::new(0.52));
                 hit_b = select(is_statue, f32::new(0.3), f32::new(0.5));
-                hit_rough = select(is_statue, f32::new(0.35), f32::new(0.8));
-                hit_metal = select(is_statue, f32::new(0.8), f32::new(0.0));
+                hit_rough = select(is_statue, f32::new(0.35), render.pillar_roughness);
+                hit_metal = select(is_statue, render.statue_metallic, f32::new(0.0));
                 hit_emiss = f32::new(0.0);
                 hit_spec = f32::new(0.5);
             }
@@ -1297,6 +1347,7 @@ pub fn raymarch_sdf_kernel(
             if hit_is_plan_obj {
                 let n = calculate_normal(
                     p.clone(), pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size,
+                    statue_center, bounding_sphere_radius_offset,
                 );
                 n_x = n.x;
                 n_y = n.y;
@@ -1328,6 +1379,7 @@ pub fn raymarch_sdf_kernel(
                     offset_p, key_dir.clone(), t_val, b_factor, render.active_slots, slots, materials,
                      rotations, arch, fold,
                      pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size,
+                     statue_center, bounding_sphere_radius_offset, env.shadow_softness_k,
                 );
                 key_visibility = shadow_factor;
             }
@@ -1336,7 +1388,8 @@ pub fn raymarch_sdf_kernel(
             if render.enable_ao_mode == u32::new(1) {
                 ao_factor = calculate_ao(p, normal.clone(), t_val, b_factor, render.active_slots, slots, materials,
                  rotations, arch, fold,
-                 pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size);
+                 pillar_spacing, pillar_height, sdf_grid, grid_res, grid_size,
+                 statue_center, bounding_sphere_radius_offset, env.ao_iterations);
             }
 
             // 🟢 TENSOR 4: Licht-Farben (Key dynamisch, Fill/Rim fix)
@@ -1405,7 +1458,7 @@ pub fn raymarch_sdf_kernel(
             final_color_z = (light_b + ambient_b) * ao_factor + emissive_b;
             // 🟢 PLAN STEP 7: 1-Bounce-Reflexion — nur auf glatten,
             // nicht-metallischen Flächen sinnvoll (Roughness-Gate).
-            if hit_rough < f32::new(0.25) {
+            if hit_rough < render.reflection_roughness_gate {
                 let refl_dir = final_rd.sub(normal.scale(f32::new(2.0) * final_rd.dot(normal.clone()))).normalize();
                 let refl_color = trace_reflection(
                     p.add(normal.scale(f32::new(0.02))),
@@ -1423,9 +1476,12 @@ pub fn raymarch_sdf_kernel(
                     grid_size,
                     Vec3::new(bg_r, bg_g, bg_b),
                     f32::new(40.0),
+                    render.reflection_max_steps,
+                    statue_center,
+                    bounding_sphere_radius_offset,
                 );
                 // Fresnel-artige Mischung: glatte Flächen spiegeln stärker.
-                let refl_strength = (f32::new(1.0) - hit_rough) * f32::new(0.35);
+                let refl_strength = (f32::new(1.0) - hit_rough) * render.fresnel_strength_factor;
                 final_color_x += refl_color.x * refl_strength;
                 final_color_y += refl_color.y * refl_strength;
                 final_color_z += refl_color.z * refl_strength;
@@ -1449,7 +1505,8 @@ pub fn raymarch_sdf_kernel(
                 hit_dist,
                 f32::new(40.0),
                 fog_density,
-                u32::new(16),
+                env.volumetric_fog_steps,
+                env.fog_density_falloff,
             );
         }
 

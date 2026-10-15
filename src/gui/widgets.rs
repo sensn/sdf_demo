@@ -72,6 +72,23 @@ pub(super) fn slider_row(
     slider: &Entity<SliderState>,
     value: f32,
 ) -> impl IntoElement {
+    slider_row_fmt(label, slider, value, 2)
+}
+
+/// 🟢 PARAM-GUI Guard Rail: Slider-Zeile mit wählbarer Präzision.
+/// `decimals = 0` → ganzzahlig (Schritt-/Iterations-Zähler),
+/// `decimals = 2` → Standard-Float-Anzeige.
+pub(super) fn slider_row_fmt(
+    label: &str,
+    slider: &Entity<SliderState>,
+    value: f32,
+    decimals: usize,
+) -> impl IntoElement {
+    let text = if decimals == 0 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.decimals$}")
+    };
     div()
         .flex()
         .flex_col()
@@ -92,7 +109,7 @@ pub(super) fn slider_row(
                         .text_color(rgb(ACCENT))
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(format!("{value:.2}")),
+                        .child(text),
                 ),
         )
         .child(Slider::new(slider).horizontal())

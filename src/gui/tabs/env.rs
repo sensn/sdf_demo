@@ -15,7 +15,7 @@ use wgpui_kit::{
 
 use crate::app_state::ApplicationState;
 
-use super::super::widgets::{acc_item, slider_row};
+use super::super::widgets::{acc_item, slider_row, slider_row_fmt};
 use super::super::{GuiState, MUTED};
 
 /// Env-Tab: ein Accordion mit Licht / Farben / Nebel.
@@ -33,7 +33,7 @@ pub(in crate::gui) fn env_tab(
         .multiple(true)
         .on_toggle_click(move |open_ix: &[usize], _win, cx| {
             acc_state.update(cx, |st, cx| {
-                st.env_open = (0..3).map(|i| open_ix.contains(&i)).collect();
+                st.env_open = (0..5).map(|i| open_ix.contains(&i)).collect();
                 cx.notify();
             });
         })
@@ -66,6 +66,24 @@ pub(in crate::gui) fn env_tab(
             vec![
                 slider_row("Fog Density", &gui.fog_density_slider, s.fog_density).into_any_element(),
                 fog_switch_row(state, s.fog_enabled == 1).into_any_element(),
+            ],
+        ))
+        // 🟢 PARAM-GUI Step 2: Atmosphere
+        .item(acc_item(
+            "Atmosphere",
+            open[3],
+            vec![
+                slider_row_fmt("Fog Steps", &gui.volumetric_fog_steps_slider, s.volumetric_fog_steps as f32, 0).into_any_element(),
+                slider_row("Fog Falloff", &gui.fog_density_falloff_slider, s.fog_density_falloff).into_any_element(),
+            ],
+        ))
+        // 🟢 PARAM-GUI Step 2: Lighting & AO
+        .item(acc_item(
+            "Lighting & AO",
+            open[4],
+            vec![
+                slider_row_fmt("AO Iterations", &gui.ao_iterations_slider, s.ao_iterations as f32, 0).into_any_element(),
+                slider_row("Shadow Softness K", &gui.shadow_softness_k_slider, s.shadow_softness_k).into_any_element(),
             ],
         ))
 }

@@ -23,7 +23,7 @@ use wgpui_kit::{
 
 use crate::app_state::ApplicationState;
 
-use super::super::widgets::{section, slider_row};
+use super::super::widgets::{section, slider_row, slider_row_fmt};
 use super::super::{GuiState, ITEM_BG, MUTED};
 
 /// Mat-Tab: Slot-Auswahl (Buttons) + PBR-Slider für den gewählten Slot.
@@ -99,6 +99,45 @@ pub(in crate::gui) fn mat_tab(
                 .child(slider_row("Metallic", &gui.mat_metallic_slider, metal))
                 .child(slider_row("Emissive", &gui.mat_emissive_slider, emiss))
                 .child(slider_row("Specular", &gui.mat_specular_slider, spec)),
+        )
+        // 🟢 PARAM-GUI Step 4: Global Reflections
+        .child(section("Global Reflections"))
+        .child(
+            div()
+                .bg(rgb(ITEM_BG))
+                .rounded_md()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(slider_row_fmt("Reflection Max Steps", &gui.reflection_max_steps_slider, s.reflection_max_steps as f32, 0))
+                .child(slider_row("Roughness Gate", &gui.reflection_roughness_gate_slider, s.reflection_roughness_gate))
+                .child(slider_row("Fresnel Strength", &gui.fresnel_strength_factor_slider, s.fresnel_strength_factor)),
+        )
+        // 🟢 PARAM-GUI Step 4: Material Physics (PBR pro Objekt-ID)
+        .child(section("Material Physics"))
+        .child(
+            div()
+                .bg(rgb(ITEM_BG))
+                .rounded_md()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_color(rgb(MUTED))
+                        .text_xs()
+                        .child("Statue PBR (ID 2)"),
+                )
+                .child(slider_row("Statue Metallic", &gui.statue_metallic_slider, s.statue_metallic))
+                .child(
+                    div()
+                        .text_color(rgb(MUTED))
+                        .text_xs()
+                        .child("Pillar PBR (ID 1)"),
+                )
+                .child(slider_row("Pillar Roughness", &gui.pillar_roughness_slider, s.pillar_roughness)),
         )
 }
 

@@ -16,19 +16,24 @@ pub const SDF_GRID_RES: usize = 64;
 /// Welt-Ausdehnung des Grids (Würfel-Kantenlänge, zentriert am Ursprung).
 /// 🟢 Auf HALBE Größe geschrumpft (war 8.0): die Statue füllte sonst
 /// den kompletten 6-Einheiten-Raum und ragte durch Boden + Decke.
+/// 🟢 PARAM-GUI: Die Grid-Größe ist jetzt datengetrieben über
+/// `RenderSettings.sdf_grid_size` (default 4.0). Diese Konstante dient
+/// nur noch als Bake-Referenz für den Voxel-Sampling-Bereich [-4,4]³.
 pub const SDF_GRID_SIZE: f32 = 4.0;
-/// Welt-Position des Statuen-Zentrums. Der Raum-Boden liegt bei
-/// y = -room_height = -3.0. Die Statue ist auf 80% des Grids
-/// normalisiert (Halbhöhe = 0.8 × SDF_GRID_SIZE/2 = 1.6) und steht
-/// auf dem Boden: Zentrum bei y = -3.0 + 1.6 = -1.4.
-pub const STATUE_CENTER: [f32; 3] = [0.0, -1.4, 0.0];
+// 🟢 PARAM-GUI: STATUE_CENTER wurde entfernt — das Statue-Zentrum ist
+// jetzt datengetrieben über `RenderSettings.statue_center`
+// (GUI: Obj-Tab → Transformations, default [0, -1.4, 0]).
 
 /// Lädt ein OBJ-File und bäckt es in ein 3D-SDF-Grid.
 ///
 /// Das Mesh wird auf die Einheits-Box normalisiert und in einen
 /// `[SDF_GRID_RES]^3`-Voxel-Buffer um `[0,0,0]` gesampelt.
 /// Rückgabe: flaches Grid in ZYX-Reihenfolge (z am langsamsten).
-pub fn load_obj_to_sdf(file_path: &str, resolution: usize) -> Vec<f32> {
+///
+/// 🟢 PARAM-GUI: `mesh_scale_factor` (0.1..1.0, default 0.8) steuert,
+/// auf welchen Anteil der Einheits-Box das Mesh normalisiert wird
+/// (vorher fest 80%). Wirkt beim (Neu-)Baken des SDF-Grids.
+pub fn load_obj_to_sdf(file_path: &str, resolution: usize, mesh_scale_factor: f32) -> Vec<f32> {
     let (models, _materials) = tobj::load_obj(
         file_path,
         &tobj::LoadOptions {
@@ -80,13 +85,14 @@ pub fn load_obj_to_sdf(file_path: &str, resolution: usize) -> Vec<f32> {
         .max(max[1] - min[1])
         .max(max[2] - min[2])
         .max(1e-6);
-    // 🟢 FIX (Bugfix-Runde 3): Mesh nur auf 80% der Einheits-Box
+    // 🟢 FIX (Bugfix-Runde 3): Mesh nur auf einen Anteil der Einheits-Box
     // normalisieren (statt 100%). Grund: die Statue füllte das Grid
     // bis zum Rand — am Rand liefert das geclampte Sampling ~0 als
     // Distanz, was im Schatten-March als Phantom-Fläche wirkte
     // (schwarzer Oval-Schatten auf dem Boden um die Statue).
     // Mit Rand bleibt zwischen Mesh und Grid-Grenze echter Abstand.
-    let scale = 1.6 / extent; // 80% von [-1,1]
+    // 🟢 PARAM-GUI: Faktor datengetrieben (default 0.8 = 80%).
+    let scale = mesh_scale_factor * 2.0 / extent; // Anteil von [-1,1]
     for v in vertices.iter_mut() {
         for c in 0..3 {
             v[c] = (v[c] - center[c]) * scale;
@@ -174,7 +180,10 @@ pub fn load_sdf_cache(path: &str, size: usize) -> std::io::Result<Vec<f32>> {
 
 /// Lädt das SDF-Grid für `obj_path` — aus dem Cache, oder bäckt es
 /// frisch und schreibt den Cache. Cache-Key: `<obj>.sdfcache`.
-pub fn load_or_bake_sdf(obj_path: &str) -> Vec<f32> {
+/// 🟢 PARAM-GUI: `mesh_scale_factor` (0.1..1.0, default 0.8) fließt in
+/// den Bake ein. Hinweis: der Cache wird nur umgangen, wenn er fehlt
+/// oder korrupt ist — Änderungen am Faktor erfordern Cache-Löschung.
+pub fn load_or_bake_sdf(obj_path: &str, mesh_scale_factor: f32) -> Vec<f32> {
     let res = SDF_GRID_RES;
     let total = res * res * res;
     let cache_path = format!("{obj_path}.sdfcache");
@@ -183,7 +192,7 @@ pub fn load_or_bake_sdf(obj_path: &str) -> Vec<f32> {
             return data;
         }
     }
-    let data = load_obj_to_sdf(obj_path, res);
+    let data = load_obj_to_sdf(obj_path, res, mesh_scale_factor);
     let _ = save_sdf_cache(&cache_path, &data);
     data
 }

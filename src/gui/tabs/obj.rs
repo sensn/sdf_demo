@@ -129,6 +129,45 @@ pub(in crate::gui) fn obj_tab(
                 .child(slider_row("Rot Y", &gui.obj_rot_y_slider, rot_y))
                 .child(slider_row("Rot Z", &gui.obj_rot_z_slider, rot_z)),
         )
+        // 🟢 PARAM-GUI Step 5: SDF Grid Space (Statue)
+        .child(section("SDF Grid Space"))
+        .child(
+            div()
+                .bg(rgb(ITEM_BG))
+                .rounded_md()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(slider_row("SDF Grid Size", &gui.sdf_grid_size_slider, s.sdf_grid_size))
+                .child(slider_row("Mesh Scale Factor", &gui.mesh_scale_factor_slider, s.mesh_scale_factor)),
+        )
+        // 🟢 PARAM-GUI Step 5: Transformations (Statue-Zentrum)
+        .child(section("Transformations"))
+        .child(
+            div()
+                .bg(rgb(ITEM_BG))
+                .rounded_md()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(slider_row("Statue Center X", &gui.statue_center_x_slider, s.statue_center_x))
+                .child(slider_row("Statue Center Y", &gui.statue_center_y_slider, s.statue_center_y))
+                .child(slider_row("Statue Center Z", &gui.statue_center_z_slider, s.statue_center_z)),
+        )
+        // 🟢 PARAM-GUI Step 5: Bounding Controls (Proximity-Schranke)
+        .child(section("Bounding Controls"))
+        .child(
+            div()
+                .bg(rgb(ITEM_BG))
+                .rounded_md()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(slider_row("Bounding Sphere Offset", &gui.bounding_sphere_radius_offset_slider, s.bounding_sphere_radius_offset)),
+        )
 }
 
 /// Typ-Name eines Slots (1=Kristall, 2=Gyroid, 3=Torus, 0=inaktiv).

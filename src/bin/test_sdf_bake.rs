@@ -8,7 +8,7 @@ fn main() {
     let res = sdf_preprocessor::SDF_GRID_RES;
     let total = res * res * res;
     println!("Bake statue.obj @ {res}³ = {total} Voxel...");
-    let grid = sdf_preprocessor::load_or_bake_sdf("assets/statue.obj");
+    let grid = sdf_preprocessor::load_or_bake_sdf("assets/statue.obj", 0.8);
     assert_eq!(grid.len(), total, "Grid-Größe falsch");
 
     // Cache-Roundtrip prüfen.

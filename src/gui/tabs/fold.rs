@@ -44,4 +44,22 @@ pub(in crate::gui) fn fold_tab(
                 .child(slider_row("Cell Size", &gui.cell_size_slider, s.cell_size))
                 .child(slider_row("Fold Speed", &gui.fold_speed_slider, s.fold_speed)),
         )
+        // 🟢 PARAM-GUI Step 3: Infinite Repetition (Pfeiler-Faltung)
+        .child(
+            div()
+                .bg(rgb(PANEL_BG))
+                .p_3()
+                .rounded_md()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_color(rgb(ACCENT))
+                        .text_sm()
+                        .child("Infinite Repetition:"),
+                )
+                .child(slider_row("Pillar Spacing", &gui.pillar_spacing_slider, s.pillar_spacing))
+                .child(slider_row("Pillar Height", &gui.pillar_height_slider, s.pillar_height)),
+        )
 }
