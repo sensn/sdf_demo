@@ -6,7 +6,7 @@
 mod app_state;
 #[path = "../gpu.rs"]
 mod gpu;
-#[path = "../kernel.rs"]
+#[path = "../kernel/mod.rs"]
 mod kernel;
 #[path = "../sdf_preprocessor.rs"]
 mod sdf_preprocessor;
