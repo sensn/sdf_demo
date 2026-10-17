@@ -66,10 +66,18 @@ pub struct TabState {
 
 /// Accordion-Öffnungs-Flags (Index-basiert, pro Tab).
 pub struct AccordionUiState {
-    /// Env-Tab: [0] = Licht, [1] = Farben, [2] = Nebel
+    /// Env-Tab: [0] = Licht, [1] = Farben, [2] = Nebel, [3] = Atmosphäre, [4] = Lighting & AO
     pub env_open: Vec<bool>,
     /// Arch-Tab: [0] = Säulen & Raum, [1] = Bögen, [2] = Dekor
     pub arch_open: Vec<bool>,
+    /// Fold-Tab: Eigene Flags für Faltungs-Untergruppen
+    pub fold_open: Vec<bool>,
+    /// Mat-Tab: [0] = PBR Parameters, [1] = Global Reflections, [2] = Material Physics
+    pub mat_open: Vec<bool>,
+    /// Obj-Tab: [0] = Position, [1] = Scale, [2] = Rotation, [3] = SDF Grid Space, [4] = Transformations & Bounds
+    pub obj_open: Vec<bool>,
+    /// Ctrl-Tab: [0] = Camera, [1] = Rendering, [2] = Key Bindings
+    pub ctrl_open: Vec<bool>,
 }
 
 // =========================================================================
@@ -455,9 +463,13 @@ impl GuiState {
             active: GuiTab::Environment,
         });
         let accordion_state = cx.new(|_| AccordionUiState {
-            env_open: vec![true, false, false, false, false],
-            arch_open: vec![true, false, false, false],
-        });
+    env_open: vec![true, false, false, false, false],
+    arch_open: vec![true, false, false, false],
+    fold_open: vec![true, false],             // Beispiel-Länge für Fold
+    mat_open: vec![true, true, true],         // Startet offen/teilweise offen
+    obj_open: vec![true, true, true, true, true],
+    ctrl_open: vec![true, true, true],        // 🟢 HIER: Alle 3 Gruppen standardmäßig komplett offen!
+});
 
         Self {
             light_intensity_slider,

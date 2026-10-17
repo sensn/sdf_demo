@@ -4,8 +4,14 @@
 use std::sync::{Arc, Mutex};
 
 use wgpui_kit::{
-    component::accordion::Accordion,
-    App, IntoElement,
+    component::{
+        accordion::Accordion,
+        switch::Switch,
+    },
+    div,
+    prelude::*,
+    rgb,
+    App, IntoElement, Styled,
 };
 
 use crate::app_state::ApplicationState;
@@ -23,6 +29,10 @@ pub(in crate::gui) fn arch_tab(
     let open = gui.accordion_state.read(cx).arch_open.clone();
 
     let acc_state = gui.accordion_state.clone();
+     // 🟢 HIER: Das Accordion wird in ein flexibles, scrollbares Div gewrappt,
+    // damit das Scroll-Verhalten identisch zu mat.rs und obj.rs ist.
+    div()
+        .child(
     Accordion::new("arch_acc")
         .bordered(true)
         .multiple(true)
@@ -67,4 +77,5 @@ pub(in crate::gui) fn arch_tab(
                 slider_row("Cell Size", &gui.cell_size_slider, s.cell_size).into_any_element(),
             ],
         ))
+        )// div for scrolling
 }

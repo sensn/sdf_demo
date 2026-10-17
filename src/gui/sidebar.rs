@@ -78,7 +78,7 @@ pub fn sidebar(
         GuiTab::Fold => tabs::fold_tab(gui, state, cx).into_any_element(),
         GuiTab::Material => tabs::mat_tab(gui, state, cx).into_any_element(),
         GuiTab::Object => tabs::obj_tab(gui, state, cx).into_any_element(), // 🟢 NEU
-        GuiTab::Controls => tabs::ctrl_tab(state).into_any_element(),
+        GuiTab::Controls => tabs::ctrl_tab(gui, state, cx).into_any_element(), // 🟢 FIX: Parameter für Accordion erweitert
     };
 
     div()

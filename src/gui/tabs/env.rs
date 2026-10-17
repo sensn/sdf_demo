@@ -12,6 +12,9 @@ use wgpui_kit::{
     rgb,
     App, IntoElement, Styled,
 };
+// Ganz oben zu den anderen Imports hinzufügen:
+
+
 
 use crate::app_state::ApplicationState;
 
@@ -28,6 +31,10 @@ pub(in crate::gui) fn env_tab(
     let open = gui.accordion_state.read(cx).env_open.clone();
 
     let acc_state = gui.accordion_state.clone();
+    // 🟢 HIER: Das Accordion wird in ein flexibles, scrollbares Div gewrappt,
+    // damit das Scroll-Verhalten identisch zu mat.rs und obj.rs ist.
+    div()
+        .child(
     Accordion::new("env_acc")
         .bordered(true)
         .multiple(true)
@@ -94,6 +101,7 @@ pub(in crate::gui) fn env_tab(
                 slider_row("Shadow Softness K", &gui.shadow_softness_k_slider, s.shadow_softness_k).into_any_element(),
             ],
         ))
+        )  //div wrapper for scrolling
 }
 
 /// Nebel-Zeile: Label + Switch (synchron mit N-Taste via ApplicationState).
