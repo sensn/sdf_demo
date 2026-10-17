@@ -138,11 +138,17 @@ pub struct EnvSettings {
     pub key_color: GpuVec3,     // war env[4..6]
     pub ambient_strength: f32,  // war env[7]
     pub bg_color: GpuVec3,      // war env[8..10]
+    // 🟢 NEU: Dedizierte Nebelfarbe für physikalisch korrektes Blending
+    pub fog_color: GpuVec3,  
     pub fog_density: f32,       // war env[11]
     pub fog_enabled: u32,       // war env[12] (f32) -> params3: u32-Flag 0/1
     // 🟢 PARAM-GUI: Atmosphäre & Lighting
     pub volumetric_fog_steps: u32, // Nebel-Integrationsschritte (4..64, default 16)
     pub fog_density_falloff: f32,  // Höhenprofil-Falloff (0.01..0.5, default 0.08)
+     // 🟢 NEU: Ausgelagerte Nebel-Parameter (Fehler behoben & erweitert)
+    pub min_height_falloff: f32,    // Minimale Nebeldichte in der Höhe (0.0..1.0, default 0.1)
+    pub max_optical_depth: f32,     // Grenzwert für Opazitäts-Abbruch (1.0..10.0, default 4.605 für ~1% Sicht)
+    pub fog_sample_offset: f32,     // Sampling-Position im Strahlsegment (0.0..1.0, default 0.5 = Mitte)
     pub ao_iterations: u32,        // AO-Sampling-Iterationen (1..10, default 5)
     pub shadow_softness_k: f32,     // Weichheits-Konstante (1.0..64.0, default 8.0)
 }

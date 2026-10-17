@@ -90,7 +90,14 @@ pub struct GuiState {
     pub bg_r_slider: Entity<SliderState>,
     pub bg_g_slider: Entity<SliderState>,
     pub bg_b_slider: Entity<SliderState>,
+    
+    // 🟢 NEU: Dedizierte Regler für die Nebelfarbe
+    pub fog_r_slider: Entity<SliderState>,
+    pub fog_g_slider: Entity<SliderState>,
+    pub fog_b_slider: Entity<SliderState>,
+    
     pub fog_density_slider: Entity<SliderState>,
+    
     // TENSOR 5 (Architektur):
     pub pillar_dist_slider: Entity<SliderState>,
     pub pillar_thick_slider: Entity<SliderState>,
@@ -121,6 +128,12 @@ pub struct GuiState {
     // 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
     pub volumetric_fog_steps_slider: Entity<SliderState>,
     pub fog_density_falloff_slider: Entity<SliderState>,
+    
+    // 🟢 NEU: Erweiterte Feineinstellungen für die Nebel-Strukturierung
+    pub min_height_falloff_slider: Entity<SliderState>,
+    pub max_optical_depth_slider: Entity<SliderState>,
+    pub fog_sample_offset_slider: Entity<SliderState>,
+    
     pub ao_iterations_slider: Entity<SliderState>,
     pub shadow_softness_k_slider: Entity<SliderState>,
     // 🟢 PARAM-GUI: Infinite Repetition (Fold-Tab)
@@ -144,7 +157,6 @@ pub struct GuiState {
     pub tab_state: Entity<TabState>,
     pub accordion_state: Entity<AccordionUiState>,
 }
-
 impl GuiState {
     /// Baut alle Slider-Entities mit min/max/step/default (Original-Konstanten)
     /// und verdrahtet die Subscriptions (Slider -> ApplicationState).
@@ -226,16 +238,35 @@ impl GuiState {
         let obj_rot_z_slider =
             cx.new(|_| SliderState::new().min(0.0).max(6.283).step(0.01).default_value(0.0));
 
-        // --- 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
+               // --- 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
         let volumetric_fog_steps_slider =
             cx.new(|_| SliderState::new().min(4.0).max(64.0).step(1.0).default_value(16.0));
         let fog_density_falloff_slider =
             cx.new(|_| SliderState::new().min(0.01).max(0.5).step(0.01).default_value(0.08));
+        
+        // 🟢 NEU: Slider-Zustände für die dedizierte Nebelfarbe (RGB, Bereich 0.0 - 1.0)
+        let fog_r_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.7));
+        let fog_g_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.7));
+        let fog_b_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.7));
+
+        // 🟢 NEU: Slider-Zustände für die erweiterten Nebel-Parameter
+        let min_height_falloff_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.1));
+        let max_optical_depth_slider =
+            cx.new(|_| SliderState::new().min(1.0).max(10.0).step(0.05).default_value(4.605));
+        let fog_sample_offset_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.05).default_value(0.5));
+
         let ao_iterations_slider =
             cx.new(|_| SliderState::new().min(1.0).max(10.0).step(1.0).default_value(5.0));
         let shadow_softness_k_slider =
             cx.new(|_| SliderState::new().min(1.0).max(64.0).step(0.5).default_value(8.0));
-        // --- 🟢 PARAM-GUI: Infinite Repetition (Fold-Tab)
+
+         
+           // --- 🟢 PARAM-GUI: Infinite Repetition (Fold-Tab)
         let pillar_spacing_slider =
             cx.new(|_| SliderState::new().min(2.0).max(20.0).step(0.1).default_value(6.0));
         let pillar_height_slider =
@@ -340,13 +371,36 @@ impl GuiState {
             if i < s.slot_rot_z.len() { s.slot_rot_z[i] = v; }
         });
 
-        // --- 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
+               // --- 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
         subscribe_slider(cx, &volumetric_fog_steps_slider, state, |s, v| {
             s.volumetric_fog_steps = v as u32;
         });
         subscribe_slider(cx, &fog_density_falloff_slider, state, |s, v| {
             s.fog_density_falloff = v;
         });
+
+        // 🟢 NEU: Änderungen der Nebelfarbe in den ApplicationState spiegeln
+        subscribe_slider(cx, &fog_r_slider, state, |s, v| {
+            s.fog_r = v;
+        });
+        subscribe_slider(cx, &fog_g_slider, state, |s, v| {
+            s.fog_g = v;
+        });
+        subscribe_slider(cx, &fog_b_slider, state, |s, v| {
+            s.fog_b = v;
+        });
+
+        // 🟢 NEU: Änderungen der erweiterten Parameter in den ApplicationState spiegeln
+        subscribe_slider(cx, &min_height_falloff_slider, state, |s, v| {
+            s.min_height_falloff = v;
+        });
+        subscribe_slider(cx, &max_optical_depth_slider, state, |s, v| {
+            s.max_optical_depth = v;
+        });
+        subscribe_slider(cx, &fog_sample_offset_slider, state, |s, v| {
+            s.fog_sample_offset = v;
+        });
+
         subscribe_slider(cx, &ao_iterations_slider, state, |s, v| {
             s.ao_iterations = v as u32;
         });
@@ -442,6 +496,15 @@ impl GuiState {
             obj_rot_z_slider,
             volumetric_fog_steps_slider,
             fog_density_falloff_slider,
+             // 🟢 NEU: Eigene Nebelfarbe-Slider im Konstruktor zuweisen
+            fog_r_slider,
+            fog_g_slider,
+            fog_b_slider,
+
+            // 🟢 NEU: Erweiterte Nebelparameter-Slider im Konstruktor zuweisen
+            min_height_falloff_slider,
+            max_optical_depth_slider,
+            fog_sample_offset_slider,
             ao_iterations_slider,
             shadow_softness_k_slider,
             pillar_spacing_slider,
@@ -510,9 +573,21 @@ impl GuiState {
             sync_one(&self.obj_rot_z_slider, state.slot_rot_z[sel], window, cx);
         }
 
+       
         // 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
         sync_one(&self.volumetric_fog_steps_slider, state.volumetric_fog_steps as f32, window, cx);
         sync_one(&self.fog_density_falloff_slider, state.fog_density_falloff, window, cx);
+
+        // 🟢 NEU: Per-Frame Sync für die Nebelfarben (RGB)
+        sync_one(&self.fog_r_slider, state.fog_r, window, cx);
+        sync_one(&self.fog_g_slider, state.fog_g, window, cx);
+        sync_one(&self.fog_b_slider, state.fog_b, window, cx);
+
+        // 🟢 NEU: Per-Frame Sync für die erweiterten Nebelparameter
+        sync_one(&self.min_height_falloff_slider, state.min_height_falloff, window, cx);
+        sync_one(&self.max_optical_depth_slider, state.max_optical_depth, window, cx);
+        sync_one(&self.fog_sample_offset_slider, state.fog_sample_offset, window, cx);
+        
         sync_one(&self.ao_iterations_slider, state.ao_iterations as f32, window, cx);
         sync_one(&self.shadow_softness_k_slider, state.shadow_softness_k, window, cx);
         // 🟢 PARAM-GUI: Infinite Repetition (Fold-Tab)

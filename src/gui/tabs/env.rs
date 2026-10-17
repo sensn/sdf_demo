@@ -58,6 +58,10 @@ pub(in crate::gui) fn env_tab(
                 slider_row("Background R", &gui.bg_r_slider, s.bg_r).into_any_element(),
                 slider_row("Background G", &gui.bg_g_slider, s.bg_g).into_any_element(),
                 slider_row("Background B", &gui.bg_b_slider, s.bg_b).into_any_element(),
+                // 🟢 NEU: Dedizierte Regler für die Nebelfarbe
+                slider_row("Fog R", &gui.fog_r_slider, s.fog_r).into_any_element(),
+                slider_row("Fog G", &gui.fog_g_slider, s.fog_g).into_any_element(),
+                slider_row("Fog B", &gui.fog_b_slider, s.fog_b).into_any_element(),
             ],
         ))
         .item(acc_item(
@@ -75,6 +79,10 @@ pub(in crate::gui) fn env_tab(
             vec![
                 slider_row_fmt("Fog Steps", &gui.volumetric_fog_steps_slider, s.volumetric_fog_steps as f32, 0).into_any_element(),
                 slider_row("Fog Falloff", &gui.fog_density_falloff_slider, s.fog_density_falloff).into_any_element(),
+                // 🟢 NEU: Erweiterte Feineinstellungen für die Nebel-Strukturierung
+                slider_row("Min Height Falloff", &gui.min_height_falloff_slider, s.min_height_falloff).into_any_element(),
+                slider_row("Max Optical Depth", &gui.max_optical_depth_slider, s.max_optical_depth).into_any_element(),
+                slider_row("Fog Sample Offset", &gui.fog_sample_offset_slider, s.fog_sample_offset).into_any_element(),
             ],
         ))
         // 🟢 PARAM-GUI Step 2: Lighting & AO

@@ -93,6 +93,17 @@ pub fn raymarch_sdf_kernel(
 
         // Block 3: Schalter (params3: u32-Flag 0/1)
         let fog_enabled = env.fog_enabled;
+         // 🟢 NEU - Block 4: Dedizierte Nebelfarbe (Komponenten-Entpackung)
+        let fog_r = env.fog_color.x;
+        let fog_g = env.fog_color.y;
+        let fog_b = env.fog_color.z;
+
+        // 🟢 NEU - Block 5: Erweiterte Nebel-Parameter für den Kernel-Aufruf
+        let fog_steps = env.volumetric_fog_steps;
+        let fog_falloff = env.fog_density_falloff;
+        let fog_min_falloff = env.min_height_falloff;
+        let fog_max_depth = env.max_optical_depth;
+        let fog_sample_offset = env.fog_sample_offset;
 
         let w_f = f32::cast_from(w_val);
         let h_f = f32::cast_from(h_val);
@@ -379,22 +390,29 @@ pub fn raymarch_sdf_kernel(
         // Ersetzt die alte lineare Distanz-Kompression: schrittweise
         // Transmittanz entlang des Strahls mit Höhen-Profil.
         // =====================================================================
-        let mut fog = f32::new(1.0);
+     let mut fog_transmittance = f32::new(1.0);
+        
         if fog_enabled > u32::new(0) {
-            fog = integrate_volumetric_fog(
+            fog_transmittance = integrate_volumetric_fog(
                 ro.clone(),
                 final_rd.clone(),
                 hit_dist,
-                f32::new(40.0),
+                f32::new(40.0), // Hardcoded 40.0 (Optional: durch env.max_fog_dist ersetzen)
                 fog_density,
-                env.volumetric_fog_steps,
-                env.fog_density_falloff,
+                fog_steps,          // Lokal entpackt
+                fog_falloff,        // Lokal entpackt
+                fog_min_falloff,    // Neu hinzugefügt (lokal entpackt)
+                fog_max_depth,      // Neu hinzugefügt (lokal entpackt)
+                fog_sample_offset,  // Neu hinzugefügt (lokal entpackt)
             );
         }
 
-        final_color_x = final_color_x * fog + bg_r * (f32::new(1.0) - fog);
-        final_color_y = final_color_y * fog + bg_g * (f32::new(1.0) - fog);
-        final_color_z = final_color_z * fog + bg_b * (f32::new(1.0) - fog);
+        // Korrektes Blending unter Verwendung der dedizierten Nebelfarbe
+        let fog_absorption = f32::new(1.0) - fog_transmittance;
+
+        final_color_x = final_color_x * fog_transmittance + fog_r * fog_absorption;
+        final_color_y = final_color_y * fog_transmittance + fog_g * fog_absorption;
+        final_color_z = final_color_z * fog_transmittance + fog_b * fog_absorption;
 
         // 🟢 ACES-TONE-MAPPING: HDR-Werte (>1.0 durch Emissive, hohe
         // Intensitäten, Glanzlichter) werden natürlich komprimiert statt

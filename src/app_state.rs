@@ -65,8 +65,15 @@ pub struct ApplicationState {
     pub bg_r: f32,
     pub bg_g: f32,
     pub bg_b: f32,
+    // 🟢 NEU: Dedizierte Nebelfarbe für das App-State-Management
+    pub fog_r: f32,
+    pub fog_g: f32,
+    pub fog_b: f32,
+
     pub fog_density: f32,
     pub fog_enabled: u32,
+    
+    
 
     // 🟢 TENSOR 5: Tempel-Architektur (data-driven)
     pub pillar_dist: f32,
@@ -84,8 +91,13 @@ pub struct ApplicationState {
     pub fold_speed: f32,
 
     // 🟢 PARAM-GUI: Atmosphäre & Lighting (Env-Tab)
-    pub volumetric_fog_steps: u32,   // Nebel-Integrationsschritte (4..64)
-    pub fog_density_falloff: f32,   // Höhenprofil-Falloff (0.01..0.5)
+ // 🟢 NEU: Parameter-GUI Steuerung für den volumetrischen Nebel
+    pub volumetric_fog_steps: u32,  // Nebel-Integrationsschritte (z.B. Default: 16)
+    pub fog_density_falloff: f32,   // Höhenprofil-Falloff (z.B. Default: 0.08)
+    pub min_height_falloff: f32,    // Minimale Dichte in der Höhe (z.B. Default: 0.1)
+    pub max_optical_depth: f32,     // Grenzwert für Opazitäts-Abbruch (z.B. Default: 4.605)
+    pub fog_sample_offset: f32,     // Sampling-Position im Segment (z.B. Default: 0.5)
+    
     pub ao_iterations: u32,        // AO-Sampling-Iterationen (1..10)
     pub shadow_softness_k: f32,     // Weichheits-Konstante (1.0..64.0)
 
@@ -185,9 +197,21 @@ impl Default for ApplicationState {
             cell_size: 10.0,
             fold_speed: 1.0,
 
+          
+            // 🟢 NEU: Standard-Nebelfarbe (z.B. ein neutrales Grauweiß/Nebelgrau)
+            fog_r: 0.7,
+            fog_g: 0.7,
+            fog_b: 0.7,
+
             // 🟢 PARAM-GUI: Atmosphäre & Lighting-Defaults
             volumetric_fog_steps: 16,
             fog_density_falloff: 0.08,
+            
+            // 🟢 NEU: Die neuen erweiterten Nebel-Parameter
+            min_height_falloff: 0.1,      // Verhindert das komplette Verschwinden in der Höhe
+            max_optical_depth: 4.605,     // Entspricht ~1% Restlicht (optimaler Abbruchwert)
+            fog_sample_offset: 0.5,       // Standard-Raymarching (Mitte des Segments)
+
             ao_iterations: 5,
             shadow_softness_k: 8.0,
 
@@ -315,13 +339,28 @@ pub fn scene_data(&self) -> Vec<f32> {
                 z: self.bg_b,
                 _pad: 0.0,
             },
-            fog_density: self.fog_density,
-            fog_enabled: self.fog_enabled,
-            // 🟢 PARAM-GUI: Atmosphäre & Lighting
-            volumetric_fog_steps: self.volumetric_fog_steps,
-            fog_density_falloff: self.fog_density_falloff,
-            ao_iterations: self.ao_iterations,
-            shadow_softness_k: self.shadow_softness_k,
+          // 🟢 NEU: Dedizierte Nebelfarbe als GPU-Vektor initialisieren
+fog_color: GpuVec3Launch {
+    x: self.fog_r,
+    y: self.fog_g,
+    z: self.fog_b,
+    _pad: 0.0,
+},
+
+        fog_density: self.fog_density,
+        fog_enabled: self.fog_enabled,
+        
+        // 🟢 PARAM-GUI: Atmosphäre & Lighting
+        volumetric_fog_steps: self.volumetric_fog_steps,
+        fog_density_falloff: self.fog_density_falloff,
+        
+        // 🟢 NEU: Die erweiterten Nebelsteuerungsparameter übergeben
+        min_height_falloff: self.min_height_falloff,
+        max_optical_depth: self.max_optical_depth,
+        fog_sample_offset: self.fog_sample_offset,
+        
+        ao_iterations: self.ao_iterations,
+        shadow_softness_k: self.shadow_softness_k,
         }
     }
 
