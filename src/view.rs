@@ -288,34 +288,34 @@ impl Render for SurfaceExample {
             // 🟢 GUI OVERLAY: Schwebende Sidebar auf der rechten Seite
             // =========================================================
             // Dank des Imports von FluentBuilder funktioniert `.when` nun fehlerfrei!
-             .when(self.show_gui, |root| {
-                root.child(
-                    div()
-                        .absolute() // Löst das Element aus dem normalen UI-Fluss
-                        .top_0()
-                        .right_0()
-                        .bottom_0()
-                        .w(px(320.0)) // Feste Breite für dein Slider-Menü
-                        .h_full()
-                         // 🟢 NATIVE GPUI-LÖSUNG: Schützt die darunterliegende 3D-Fläche vor Maus-Events
-                        .occlude() 
-                        // Ein edler, semitransparenter Hintergrund
-                        .bg(wgpui_kit::rgba(0x10121ae6)) 
-                        // 🟢 KORREKTUR: Schatten durch feine, dunkle Trennlinie links ersetzen
-                        .border_l(px(1.0))
-                        .border_color(rgb(0x1c1e26))
-                         // 🟢 NEU: Blockiert, dass Mausbewegungen an das Root-div (Kamera) durchgereicht werden
-                        // 1. 🟢 Fängt Klicks (Slider-Drücken) ab, bevor sie das Root-div erreichen
-                        //.capture_any_mouse_down(|_event, _win, _cx| {})
-                         // 🟢 KORREKTUR E0061: MouseButton::Left explizit übergeben
-                       // .on_mouse_down(wgpui_kit::MouseButton::Left, _cx.listener(|this: &mut Self, _event, win, _cx| {
-                       //     win.focus(&this.focus_handle, _cx);
-                       // }))
-                        // 2. 🟢 Fängt reine Mausbewegungen über der GUI ab
-                        //.on_mouse_move(|_event, _win, _cx| {})
-                        // Hier wird deine bestehende Sidebar eingebettet
-                        .child(gui::sidebar(&mut self.gui, &self.state, window, _cx))
-                )
+          
+                .when(self.show_gui, |root| {
+                root
+                    // 🟢 1. MENÜLEISTE (Identischer, sauberer Aufruf ohne Pointer-Tricks!)
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .h(px(32.0))
+                            .occlude()   
+                            .child(gui::menubar(&mut self.gui, &self.state, window, _cx))
+                    )
+                    // 🟢 2. SIDEBAR
+                    .child(
+                        div()
+                            .absolute() 
+                            .top_0() 
+                            .right_0()
+                            .bottom_0()
+                            .w(px(320.0)) 
+                            .occlude() 
+                            .bg(wgpui_kit::rgba(0x10121ae6)) 
+                            .border_l(px(1.0))
+                            .border_color(rgb(0x1c1e26))
+                            .child(gui::sidebar(&mut self.gui, &self.state, window, _cx))
+                    )
             })
+
     }
 }

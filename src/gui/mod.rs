@@ -19,11 +19,12 @@
 //! - `tabs/`       — ein File pro Tab (env, arch, fold, mat, ctrl)
 
 mod sidebar;
+mod menubar;
 mod tabs;
 mod widgets;
 
 pub use sidebar::sidebar;
-
+pub use menubar::menubar;
 use widgets::{subscribe_slider, sync_one};
 
 use std::sync::{Arc, Mutex};
