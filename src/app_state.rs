@@ -241,22 +241,26 @@ use crate::kernel::{
     ArchParamsLaunch, CameraSettingsLaunch, EnvSettingsLaunch, FoldParamsLaunch,
     GpuVec3Launch, RenderSettingsLaunch,
 };
+// 🟢 Bringe den zentralen Typ-Alias in den Scope (Passe den Pfad ggf. an deine Struktur an)
+ use crate::gpu::GpuFloat;
+
 
 impl ApplicationState {
     /// Kamera-Struct (params5): Position + Yaw/Pitch als 16-Byte-Alignment-Struct.
-    pub fn camera_launch(&self) -> CameraSettingsLaunch<f32>{
-        CameraSettingsLaunch::<f32> {
+  pub fn camera_launch(&self) -> CameraSettingsLaunch<GpuFloat> {
+        CameraSettingsLaunch::<GpuFloat> {
             position: GpuVec3Launch {
-                x: self.cam_x,
-                y: self.cam_y,
-                z: self.cam_z,
-                _pad: 0.0,
+                // Wenn deine State-Variablen (cam_x, etc.) normale f32 sind,
+                // mappen sie direkt ohne Cast, solange GpuFloat = f32 ist.
+                x: self.cam_x as GpuFloat,
+                y: self.cam_y as GpuFloat,
+                z: self.cam_z as GpuFloat,
+                _pad: 0.0_f32 as GpuFloat, // Verhindert future-incompatibility Warnungen
             },
-            yaw: self.cam_yaw,
-            pitch: self.cam_pitch,
+            yaw: self.cam_yaw as GpuFloat,
+            pitch: self.cam_pitch as GpuFloat,
         }
     }
-
     /// Slots-Tensor: Packt alle parallelen Slot-Vektoren in das vom 
     /// Kernel erwartete Interleaved-Format [Typ, Größe, X, Z, ...].
      /// Slots-Tensor: Packt alle parallelen Slot-Vektoren in das vom 
@@ -264,14 +268,14 @@ impl ApplicationState {
     /// Slots-Tensor: Packt alle 8 CPU-Kanäle dynamisch und ohne Abstraktionsverlust
     /// in das vom Kernel geforderte Stride-8 Interleaved Format.
   /// Packt Slots, Materials und Rotations in einen einzigen, zusammenhängenden f32-Buffer (Größe: 1500 f32s)
-pub fn scene_data(&self) -> Vec<f32> {
+pub fn scene_data(&self) -> Vec<GpuFloat> {
     const MAX_SLOTS: usize = 100;
     
     // Gesamtgröße: (100 * 8) + (100 * 4) + (100 * 3) = 1500 Elemente
     const TOTAL_SIZE: usize = (MAX_SLOTS * 8) + (MAX_SLOTS * 4) + (MAX_SLOTS * 3);
     
-    // Mit Nullen vorinitialisieren, damit ungenutzte Slots sichere Standardwerte haben
-    let mut packed_data = vec![0.0f32; TOTAL_SIZE];
+    // Mit typisierten Nullen vorinitialisieren (GpuFloat)
+    let mut packed_data = vec![0.0_f32 as GpuFloat; TOTAL_SIZE];
     
     // Exakte Start-Offsets im Ziel-Array definieren
     let slots_offset = 0;
@@ -284,143 +288,147 @@ pub fn scene_data(&self) -> Vec<f32> {
 
         // 1. SKALARE & POSITIONS-SLOTS PACKEN (Stride 8)
         let s_base = slots_offset + (i * 8);
-        packed_data[s_base]     = self.slot_types[i];      // [0] Typ
-        packed_data[s_base + 1] = self.slot_sizes[i];      // [1] Größe (Scale)
-        packed_data[s_base + 2] = self.slot_offsets_x[i];  // [2] Position X
-        packed_data[s_base + 3] = self.slot_offsets_y[i];  // [3] Position Y
-        packed_data[s_base + 4] = self.slot_offsets_z[i];  // [4] Position Z
-        packed_data[s_base + 5] = self.slot_r[i];          // [5] Farbe R
-        packed_data[s_base + 6] = self.slot_g[i];          // [6] Farbe G
-        packed_data[s_base + 7] = self.slot_b[i];          // [7] Farbe B
+        packed_data[s_base]     = self.slot_types[i] as GpuFloat;      // Typ
+        packed_data[s_base + 1] = self.slot_sizes[i] as GpuFloat;      // Größe (Scale)
+        packed_data[s_base + 2] = self.slot_offsets_x[i] as GpuFloat;  // Position X
+        packed_data[s_base + 3] = self.slot_offsets_y[i] as GpuFloat;  // Position Y
+        packed_data[s_base + 4] = self.slot_offsets_z[i] as GpuFloat;  // Position Z
+        packed_data[s_base + 5] = self.slot_r[i] as GpuFloat;          // Farbe R
+        packed_data[s_base + 6] = self.slot_g[i] as GpuFloat;          // Farbe G
+        packed_data[s_base + 7] = self.slot_b[i] as GpuFloat;          // Farbe B
 
         // 2. MATERIALIEN PACKEN (Stride 4)
         let m_base = materials_offset + (i * 4);
-        packed_data[m_base]     = self.slot_roughness[i];
-        packed_data[m_base + 1] = self.slot_metallic[i];
-        packed_data[m_base + 2] = self.slot_emissive[i];
-        packed_data[m_base + 3] = self.slot_specular[i];
+        packed_data[m_base]     = self.slot_roughness[i] as GpuFloat;
+        packed_data[m_base + 1] = self.slot_metallic[i] as GpuFloat;
+        packed_data[m_base + 2] = self.slot_emissive[i] as GpuFloat;
+        packed_data[m_base + 3] = self.slot_specular[i] as GpuFloat;
 
         // 3. ROTATIONEN PACKEN (Stride 3)
+        // 🟢 FIX: Deklaration von r_base wieder hinzugefügt!
         let r_base = rotations_offset + (i * 3);
-        packed_data[r_base]     = *self.slot_rot_x.get(i).unwrap_or(&0.0f32);
-        packed_data[r_base + 1] = *self.slot_rot_y.get(i).unwrap_or(&0.0f32);
-        packed_data[r_base + 2] = *self.slot_rot_z.get(i).unwrap_or(&0.0f32);
+        packed_data[r_base]     = *self.slot_rot_x.get(i).unwrap_or(&0.0_f32) as GpuFloat;
+        packed_data[r_base + 1] = *self.slot_rot_y.get(i).unwrap_or(&0.0_f32) as GpuFloat;
+        packed_data[r_base + 2] = *self.slot_rot_z.get(i).unwrap_or(&0.0_f32) as GpuFloat;
     }
-    // 🟢 PLAN STEP 2/3: SDF-Statuen-Grid anhängen (64³ Voxel, ZYX-
-    // Reihenfolge). Wird einmal aus OBJ gebäckt (Cache: *.sdfcache)
-    // und reist im selben Mega-Buffer wie Slots/Materials/Rotationen.
-    // 🟢 PARAM-GUI: mesh_scale_factor fließt in den Bake ein (default 0.8).
+    
+    // PLAN STEP 2/3: SDF-Statuen-Grid laden
     let sdf_grid = crate::sdf_preprocessor::load_or_bake_sdf("assets/statue.obj", self.mesh_scale_factor);
-    packed_data.extend_from_slice(&sdf_grid);
+    
+    // Mappe das f32-Voxel-Grid dynamisch auf den GpuFloat-Typ um beim Anhängen.
+    packed_data.extend(sdf_grid.iter().map(|&val| val as GpuFloat));
+    
     packed_data
 }
-
     /// Umwelt-Struct (ersetzt Tensor 4 / env_data()[16]): Licht, Farben, Nebel.
     /// fog_enabled als u32-Flag 0/1 (params3) statt f32.
-    pub fn env_launch(&self) -> EnvSettingsLaunch<f32> {
-        EnvSettingsLaunch::<f32> {
+   pub fn env_launch(&self) -> EnvSettingsLaunch<GpuFloat> {
+        EnvSettingsLaunch::<GpuFloat> {
             key_light_pos: GpuVec3Launch {
-                x: self.key_light_x,
-                y: self.key_light_y,
-                z: self.key_light_z,
-                _pad: 0.0,
+                x: self.key_light_x as GpuFloat,
+                y: self.key_light_y as GpuFloat,
+                z: self.key_light_z as GpuFloat,
+                _pad: 0.0_f32 as GpuFloat,
             },
-            light_intensity: self.light_intensity,
+            light_intensity: self.light_intensity as GpuFloat,
             key_color: GpuVec3Launch {
-                x: self.key_r,
-                y: self.key_g,
-                z: self.key_b,
-                _pad: 0.0,
+                x: self.key_r as GpuFloat,
+                y: self.key_g as GpuFloat,
+                z: self.key_b as GpuFloat,
+                _pad: 0.0_f32 as GpuFloat,
             },
-            ambient_strength: self.ambient_strength,
+            ambient_strength: self.ambient_strength as GpuFloat,
             bg_color: GpuVec3Launch {
-                x: self.bg_r,
-                y: self.bg_g,
-                z: self.bg_b,
-                _pad: 0.0,
+                x: self.bg_r as GpuFloat,
+                y: self.bg_g as GpuFloat,
+                z: self.bg_b as GpuFloat,
+                _pad: 0.0_f32 as GpuFloat,
             },
-          // 🟢 NEU: Dedizierte Nebelfarbe als GPU-Vektor initialisieren
-fog_color: GpuVec3Launch::<f32> {
-    x: self.fog_r,
-    y: self.fog_g,
-    z: self.fog_b,
-    _pad: 0.0,
-},
-
-
-        fog_density: self.fog_density,
-        fog_enabled: self.fog_enabled,
-        
-        // 🟢 PARAM-GUI: Atmosphäre & Lighting
-        volumetric_fog_steps: self.volumetric_fog_steps,
-        fog_density_falloff: self.fog_density_falloff,
-        
-        // 🟢 NEU: Die erweiterten Nebelsteuerungsparameter übergeben
-        min_height_falloff: self.min_height_falloff,
-        max_optical_depth: self.max_optical_depth,
-        fog_sample_offset: self.fog_sample_offset,
-        
-        ao_iterations: self.ao_iterations,
-        shadow_softness_k: self.shadow_softness_k,
+            // 🟢 KORREKTUR: Typparameter auf GpuFloat umgestellt
+            fog_color: GpuVec3Launch::<GpuFloat> {
+                x: self.fog_r as GpuFloat,
+                y: self.fog_g as GpuFloat,
+                z: self.fog_b as GpuFloat,
+                _pad: 0.0_f32 as GpuFloat,
+            },
+            fog_density: self.fog_density as GpuFloat,
+            // Ein Boolean bleibt im Host-Struct erhalten, da CubeLaunch ihn für den Verzweigungs-Zustand mappt
+            fog_enabled: self.fog_enabled, 
+            
+            // 🟢 PARAM-GUI: Atmosphäre & Lighting
+            volumetric_fog_steps: self.volumetric_fog_steps, // bleibt Ganzzahl (u32/i32)
+            fog_density_falloff: self.fog_density_falloff as GpuFloat,
+            
+            // 🟢 NEU: Die erweiterten Nebelsteuerungsparameter übergeben
+            min_height_falloff: self.min_height_falloff as GpuFloat,
+            max_optical_depth: self.max_optical_depth as GpuFloat,
+            fog_sample_offset: self.fog_sample_offset as GpuFloat,
+            
+            ao_iterations: self.ao_iterations, // bleibt Ganzzahl
+            shadow_softness_k: self.shadow_softness_k as GpuFloat,
         }
     }
 
     /// Architektur-Struct (ersetzt Tensor 5 / arch_data()[12]).
-    pub fn arch_launch(&self) -> ArchParamsLaunch<f32> {
-        ArchParamsLaunch::<f32>{
-            pillar_dist: self.pillar_dist,
-            pillar_thick: self.pillar_thick,
-            room_height: self.room_height,
-            ceiling_thick: self.ceiling_thick,
-            arch_radius: self.arch_radius,
-            arch_height: self.arch_height,
-            decor_freq: self.decor_freq,
-            decor_depth: self.decor_depth,
-            decor_thick: self.decor_thick,
+    pub fn arch_launch(&self) -> ArchParamsLaunch<GpuFloat> {
+        ArchParamsLaunch::<GpuFloat> {
+            pillar_dist: self.pillar_dist as GpuFloat,
+            pillar_thick: self.pillar_thick as GpuFloat,
+            room_height: self.room_height as GpuFloat,
+            ceiling_thick: self.ceiling_thick as GpuFloat,
+            arch_radius: self.arch_radius as GpuFloat,
+            arch_height: self.arch_height as GpuFloat,
+            decor_freq: self.decor_freq as GpuFloat,
+            decor_depth: self.decor_depth as GpuFloat,
+            decor_thick: self.decor_thick as GpuFloat,
         }
     }
 
     /// Faltungs-Struct (ersetzt Tensor 6 / fold_data()[4]).
-    pub fn fold_launch(&self) -> FoldParamsLaunch<f32> {
-        FoldParamsLaunch::<f32>{
-            cell_size: self.cell_size,
-            half_cell: self.cell_size * 0.5,
-            fold_speed: self.fold_speed,
+    pub fn fold_launch(&self) -> FoldParamsLaunch<GpuFloat> {
+        FoldParamsLaunch::<GpuFloat> {
+            cell_size: self.cell_size as GpuFloat,
+            // 🟢 KORREKTUR: Multiplikation mit typisiertem Suffix, um Fallback-Warnungen zu umgehen
+            half_cell: (self.cell_size * 0.5_f32) as GpuFloat,
+            fold_speed: self.fold_speed as GpuFloat,
             // 🟢 PARAM-GUI: Infinite Repetition
-            pillar_spacing: self.pillar_spacing,
-            pillar_height: self.pillar_height,
+            pillar_spacing: self.pillar_spacing as GpuFloat,
+            pillar_height: self.pillar_height as GpuFloat,
         }
     }
 
+
     /// Render-Struct (ersetzt Meta-Tensor + 12 lose Launch-Skalare).
     /// active_slots als u32-Count (params3).
-    pub fn render_launch(&self, time: f32, width: u32, height: u32) -> RenderSettingsLaunch <f32>{
-        RenderSettingsLaunch::<f32> {
+    pub fn render_launch(&self, time: GpuFloat, width: u32, height: u32) -> RenderSettingsLaunch<GpuFloat> {
+        RenderSettingsLaunch::<GpuFloat> {
             time,
             width,
             height,
-            blend_factor: self.dynamic_blend_factor,
+            blend_factor: self.dynamic_blend_factor as GpuFloat,
             active_slots: self.active_slots_count as u32,
             shadow_mode: self.current_shadow_mode,
             enable_ao_mode: self.enable_ao_mode,
             enable_key: self.enable_key,
             enable_fill: self.enable_fill,
             enable_rim: self.enable_rim,
+            
             // 🟢 PARAM-GUI: Materialien & Reflexionen
-            reflection_max_steps: self.reflection_max_steps,
-            reflection_roughness_gate: self.reflection_roughness_gate,
-            fresnel_strength_factor: self.fresnel_strength_factor,
-            statue_metallic: self.statue_metallic,
-            pillar_roughness: self.pillar_roughness,
+            reflection_max_steps: self.reflection_max_steps, // bleibt u32 / Ganzzahl
+            reflection_roughness_gate: self.reflection_roughness_gate as GpuFloat,
+            fresnel_strength_factor: self.fresnel_strength_factor as GpuFloat,
+            statue_metallic: self.statue_metallic as GpuFloat,
+            pillar_roughness: self.pillar_roughness as GpuFloat,
+            
             // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration
-            sdf_grid_size: self.sdf_grid_size,
-            statue_center: GpuVec3Launch::<f32> {
-                x: self.statue_center_x,
-                y: self.statue_center_y,
-                z: self.statue_center_z,
-                _pad: 0.0,
+            sdf_grid_size: self.sdf_grid_size as GpuFloat,
+            statue_center: GpuVec3Launch::<GpuFloat> {
+                x: self.statue_center_x as GpuFloat,
+                y: self.statue_center_y as GpuFloat,
+                z: self.statue_center_z as GpuFloat,
+                _pad: 0.0_f32 as GpuFloat,
             },
-            bounding_sphere_radius_offset: self.bounding_sphere_radius_offset,
+            bounding_sphere_radius_offset: self.bounding_sphere_radius_offset as GpuFloat,
         }
     }
 

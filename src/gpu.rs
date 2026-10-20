@@ -20,6 +20,10 @@ use cubecl_wgpu::{init_device, RuntimeOptions, WgpuRuntime, WgpuSetup};
 use cubecl_zspace::{Shape, Strides};
 use wgpui_kit::WgpuSurfaceHandle;
 
+/// 🟢 ZENTRALE STEUERUNG FÜR DIE GPU-PRÄZISION
+/// Hier kannst du den Typ global auf `f32`, `f64` oder (falls vom Backend unterstützt) `f16` ändern.
+pub type GpuFloat = f32;  // Centralized precision switch
+
 // =========================================================================
 // 📐 GLOBALE GPU-PIPELINE KONSTANTEN (STRUCTURED BUFFER PACKING)
 // =========================================================================
@@ -451,7 +455,7 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
     /// 🟢 Headless-fähiger Kernel-Launch: kompiliert den CubeCL-Kernel
     /// (WGSL-Codegen) und startet den Compute-Pass. Getrennt vom Blit,
     /// damit Tests den Kernel ohne Surface treiben können.
-pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: f32) {
+pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: GpuFloat) {
     let total_pixels = (dw * dh) as usize;
     let cube_count = cubecl::CubeCount::Static(
         dw.div_ceil(CUBE_DIM_X),
@@ -477,8 +481,8 @@ pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: f3
         )
     };
     
-    // 💡 KORREKTUR: Nutzt jetzt wieder .launch statt .launch_unchecked
-    crate::kernel::raymarch_sdf_kernel::launch::<f32>(
+    // 🟢 KORREKTUR: Nutzt jetzt den generischen Typ-Alias statt des hartcodierten f32
+    crate::kernel::raymarch_sdf_kernel::launch::<GpuFloat>(
         &self.client,
         cube_count,
         cube_dim,
@@ -491,7 +495,6 @@ pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: f3
         s.render_launch(time, dw, dh),
     );
 }
-
     pub fn render_frame(
         &mut self,
         view: &wgpu::TextureView,
