@@ -451,40 +451,46 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
     /// 🟢 Headless-fähiger Kernel-Launch: kompiliert den CubeCL-Kernel
     /// (WGSL-Codegen) und startet den Compute-Pass. Getrennt vom Blit,
     /// damit Tests den Kernel ohne Surface treiben können.
-    pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: f32) {
-        let total_pixels = (dw * dh) as usize;
-        let cube_count = cubecl::CubeCount::Static(
-            dw.div_ceil(CUBE_DIM_X),
-            dh.div_ceil(CUBE_DIM_Y),
-            1,
-        );
-        let cube_dim = cubecl::CubeDim::new_3d(CUBE_DIM_X, CUBE_DIM_Y, 1);
-        // --- Kernel-Args (unsafe: Handles sind korrekt sized, Strides/Shape 1D) ---
-        let output_arg = unsafe {
-            TensorArg::from_raw_parts(
-                self.output_handle.clone(),
-                Strides::from(&[1usize]),
-                Shape::from(&[total_pixels]),
-            )
-        };
-        // 2. 🟢 NEU: Erzeuge die BufferArgs direkt aus deinen Handles und den exakten Element-Längen
-        // 2. Erstellung des einzelnen BufferArg für CubeCL
-        let scene_arg = unsafe {
-            cubecl::prelude::BufferArg::from_raw_parts(self.scene_handle.clone(), TOTAL_SCENE_FLOATS)
-        };
-        crate::kernel::raymarch_sdf_kernel::launch(
-            &self.client,
-            cube_count,
-            cube_dim,
-            output_arg,
-            scene_arg,
-            s.camera_launch(),
-            s.env_launch(),
-            s.arch_launch(),
-            s.fold_launch(),
-            s.render_launch(time, dw, dh),
-        );
-    }
+pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: f32) {
+    let total_pixels = (dw * dh) as usize;
+    let cube_count = cubecl::CubeCount::Static(
+        dw.div_ceil(CUBE_DIM_X),
+        dh.div_ceil(CUBE_DIM_Y),
+        1,
+    );
+    let cube_dim = cubecl::CubeDim::new_3d(CUBE_DIM_X, CUBE_DIM_Y, 1);
+    
+    // --- Kernel-Args ---
+    let output_arg = unsafe {
+        TensorArg::from_raw_parts(
+            self.output_handle.clone(),
+            (&[1usize]).into(),
+            (&[total_pixels]).into(),
+        )
+    };
+    
+    let scene_arg = unsafe {
+        cubecl::prelude::TensorArg::from_raw_parts(
+            self.scene_handle.clone(),
+            (&[TOTAL_SCENE_FLOATS]).into(), 
+            (&[1usize]).into(),                  
+        )
+    };
+    
+    // 💡 KORREKTUR: Nutzt jetzt wieder .launch statt .launch_unchecked
+    crate::kernel::raymarch_sdf_kernel::launch::<f32>(
+        &self.client,
+        cube_count,
+        cube_dim,
+        output_arg,
+        scene_arg,
+        s.camera_launch(),
+        s.env_launch(),
+        s.arch_launch(),
+        s.fold_launch(),
+        s.render_launch(time, dw, dh),
+    );
+}
 
     pub fn render_frame(
         &mut self,

@@ -244,8 +244,8 @@ use crate::kernel::{
 
 impl ApplicationState {
     /// Kamera-Struct (params5): Position + Yaw/Pitch als 16-Byte-Alignment-Struct.
-    pub fn camera_launch(&self) -> CameraSettingsLaunch {
-        CameraSettingsLaunch {
+    pub fn camera_launch(&self) -> CameraSettingsLaunch<f32>{
+        CameraSettingsLaunch::<f32> {
             position: GpuVec3Launch {
                 x: self.cam_x,
                 y: self.cam_y,
@@ -317,8 +317,8 @@ pub fn scene_data(&self) -> Vec<f32> {
 
     /// Umwelt-Struct (ersetzt Tensor 4 / env_data()[16]): Licht, Farben, Nebel.
     /// fog_enabled als u32-Flag 0/1 (params3) statt f32.
-    pub fn env_launch(&self) -> EnvSettingsLaunch {
-        EnvSettingsLaunch {
+    pub fn env_launch(&self) -> EnvSettingsLaunch<f32> {
+        EnvSettingsLaunch::<f32> {
             key_light_pos: GpuVec3Launch {
                 x: self.key_light_x,
                 y: self.key_light_y,
@@ -340,12 +340,13 @@ pub fn scene_data(&self) -> Vec<f32> {
                 _pad: 0.0,
             },
           // 🟢 NEU: Dedizierte Nebelfarbe als GPU-Vektor initialisieren
-fog_color: GpuVec3Launch {
+fog_color: GpuVec3Launch::<f32> {
     x: self.fog_r,
     y: self.fog_g,
     z: self.fog_b,
     _pad: 0.0,
 },
+
 
         fog_density: self.fog_density,
         fog_enabled: self.fog_enabled,
@@ -365,8 +366,8 @@ fog_color: GpuVec3Launch {
     }
 
     /// Architektur-Struct (ersetzt Tensor 5 / arch_data()[12]).
-    pub fn arch_launch(&self) -> ArchParamsLaunch {
-        ArchParamsLaunch {
+    pub fn arch_launch(&self) -> ArchParamsLaunch<f32> {
+        ArchParamsLaunch::<f32>{
             pillar_dist: self.pillar_dist,
             pillar_thick: self.pillar_thick,
             room_height: self.room_height,
@@ -380,8 +381,8 @@ fog_color: GpuVec3Launch {
     }
 
     /// Faltungs-Struct (ersetzt Tensor 6 / fold_data()[4]).
-    pub fn fold_launch(&self) -> FoldParamsLaunch {
-        FoldParamsLaunch {
+    pub fn fold_launch(&self) -> FoldParamsLaunch<f32> {
+        FoldParamsLaunch::<f32>{
             cell_size: self.cell_size,
             half_cell: self.cell_size * 0.5,
             fold_speed: self.fold_speed,
@@ -393,8 +394,8 @@ fog_color: GpuVec3Launch {
 
     /// Render-Struct (ersetzt Meta-Tensor + 12 lose Launch-Skalare).
     /// active_slots als u32-Count (params3).
-    pub fn render_launch(&self, time: f32, width: u32, height: u32) -> RenderSettingsLaunch {
-        RenderSettingsLaunch {
+    pub fn render_launch(&self, time: f32, width: u32, height: u32) -> RenderSettingsLaunch <f32>{
+        RenderSettingsLaunch::<f32> {
             time,
             width,
             height,
@@ -413,7 +414,7 @@ fog_color: GpuVec3Launch {
             pillar_roughness: self.pillar_roughness,
             // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration
             sdf_grid_size: self.sdf_grid_size,
-            statue_center: GpuVec3Launch {
+            statue_center: GpuVec3Launch::<f32> {
                 x: self.statue_center_x,
                 y: self.statue_center_y,
                 z: self.statue_center_z,
