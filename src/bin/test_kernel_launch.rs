@@ -47,7 +47,10 @@ fn main() {
 
     let state = Arc::new(Mutex::new(ApplicationState::default()));
     {
-        let s = state.lock().unwrap();
+        let mut s = state.lock().unwrap();
+        // Regressionstest des Surface-Kernels: explizit Surface-Modus erzwingen
+        // (Default ist seit TR.md der volumetrische Pfad, render_mode = 1).
+        s.render_mode = 0;
         // Scene-Buffer (inkl. SDF-Grid) schreiben wie im Render-Loop.
         pipeline.write_state_buffers(&s);
         // Ein Kernel-Launch — triggert den CubeCL-Kernel-Compile (WGSL).

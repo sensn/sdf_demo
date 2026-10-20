@@ -92,7 +92,13 @@ if morph_wave > 0.5 {
 
         //TEST END
         */
-        pipeline.write_state_buffers(&s);
+        // 🌌 VOLUMETRIC (TR.md): Zero-Copy — im volumetrischen Modus wird kein
+        // Szenen-Buffer hochgeladen; alle Raumdaten entstehen prozedural in
+        // den ALU-Registern des Kernels (TR §1, §4.1). Upload nur im
+        // Surface-Modus (render_mode == 0).
+        if s.render_mode == 0 {
+            pipeline.write_state_buffers(&s);
+        }
          // 3. OPTIMIERUNG: Wir lösen den Mutex-Lock explizit HIER auf! 
         // Dadurch muss dein wgpui-UI-Thread beim Bewegen der Slider niemals auf 
         // die GPU-Renderzeit warten. Ruckler in der GUI sind damit komplett eliminiert.

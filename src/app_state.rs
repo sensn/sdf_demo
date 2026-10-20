@@ -118,13 +118,18 @@ pub struct ApplicationState {
     pub statue_center_y: f32,               // Statue-Zentrum Y (default -1.4)
     pub statue_center_z: f32,               // Statue-Zentrum Z
     pub bounding_sphere_radius_offset: f32, // Proximity-Schranke (default 0.1)
-    pub mesh_scale_factor: f32,             // Mesh-Normalisierung (0.1..1.0, default 0.8)
+    pub mesh_scale_factor: f32,          // Mesh-Normalisierung (0.1..1.0, default 0.8)
+
+    // 🌌 VOLUMETRIC (TR.md): 0 = Surface-Raymarching, 1 = Volumetric-Pfad
+    // (Default 1: volumetrischer Renderer ist der TR-Zielzustand)
+    pub render_mode: u32,
 }
 
 impl Default for ApplicationState {
     fn default() -> Self {
         Self {
-        // 
+        //
+            render_mode: 1, // 🌌 Volumetrischer Modus als Default (TR.md)
             current_selected_slot: 0,
             active_slots_count: 5.0,
             slot_types: vec![1.0, 2.0, 3.0, 0.0, 0.0],

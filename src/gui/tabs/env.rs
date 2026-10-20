@@ -79,6 +79,14 @@ pub(in crate::gui) fn env_tab(
                 fog_switch_row(state, s.fog_enabled == 1).into_any_element(),
             ],
         ))
+        // 🌌 VOLUMETRIC (TR.md): Modus-Umschalter Surface ↔ Volumetric
+        .item(acc_item(
+            "Volumetric (TR.md)",
+            open[1],
+            vec![
+                render_mode_switch_row(state, s.render_mode == 1).into_any_element(),
+            ],
+        ))
         // 🟢 PARAM-GUI Step 2: Atmosphere
         .item(acc_item(
             "Atmosphere",
@@ -102,6 +110,34 @@ pub(in crate::gui) fn env_tab(
             ],
         ))
         )  //div wrapper for scrolling
+}
+
+/// 🌌 VOLUMETRIC (TR.md): Modus-Zeile Surface ↔ Volumetric.
+/// render_mode = 1 → Zero-Copy-Volumenpfad (Gyroid-Dichtefeld, Beer-Lambert,
+/// Henyey-Greenstein, Temporal Dithering, HDR-Emission), render_mode = 0 →
+/// klassischer Surface-Raymarcher (Regressionspfad).
+pub(super) fn render_mode_switch_row(
+    state: &Arc<Mutex<ApplicationState>>,
+    checked: bool,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_row()
+        .justify_between()
+        .items_center()
+        .child(div().text_color(rgb(MUTED)).text_xs().child("Volumetric Mode"))
+        .child(
+            Switch::new("render_mode_switch")
+                .checked(checked)
+                .on_click({
+                    let state = state.clone();
+                    move |checked: &bool, _win, _cx| {
+                        if let Ok(mut s) = state.lock() {
+                            s.render_mode = if *checked { 1 } else { 0 };
+                        }
+                    }
+                }),
+        )
 }
 
 /// Nebel-Zeile: Label + Switch (synchron mit N-Taste via ApplicationState).

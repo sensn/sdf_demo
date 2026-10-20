@@ -26,6 +26,7 @@ pub mod scene;
 pub mod shadows;
 pub mod statue_grid;
 pub mod types;
+pub mod volume;
 
 // Re-Exports: alter `crate::kernel::X`-Pfad bleibt gültig
 pub use types::{

@@ -472,6 +472,24 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
         let scene_arg = unsafe {
             cubecl::prelude::BufferArg::from_raw_parts(self.scene_handle.clone(), TOTAL_SCENE_FLOATS)
         };
+        // 🌌 VOLUMETRIC (TR.md): Modus-Dispatch — im volumetrischen Pfad wird
+        // KEIN Szenen-Buffer gelesen (Zero-Copy: alle Raumdaten entstehen
+        // prozedural in den ALU-Registern, TR §4.1). Der Surface-Kernel bleibt
+        // als Regressionspfad erhalten (render_mode = 0).
+        if s.render_mode == 1 {
+            crate::kernel::volume::volume_kernel::render_volumetric_kernel::launch(
+                &self.client,
+                cube_count,
+                cube_dim,
+                output_arg,
+                s.camera_launch(),
+                s.env_launch(),
+                s.arch_launch(),
+                s.fold_launch(),
+                s.render_launch(time, dw, dh),
+            );
+            return;
+        }
         crate::kernel::raymarch_sdf_kernel::launch(
             &self.client,
             cube_count,
