@@ -212,11 +212,10 @@ pub struct RenderSettings<F: Float> {
     pub reflection_max_steps: u32,   // Sekundär-Schritte (8..64, default 32)
     pub reflection_roughness_gate: F, // Aktivierungsschwelle (0.05..1.0, default 0.25)
     pub fresnel_strength_factor: F,  // Reflexions-Stärke (0.0..1.0, default 0.35)
-    pub statue_metallic: F,          // Statue PBR (ID 2), default 0.8
     pub pillar_roughness: F,         // Pfeiler PBR (ID 1), default 0.8
-    // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration
-    pub sdf_grid_size: F,             // Grid-Ausdehnung (1.0..16.0, default 4.0)
-    pub statue_center: GpuVec3<F>,     // Statue-Zentrum (default [0, -1.4, 0])
+    // 🟢 SDF-OBJEKT-TENSOR: Statue-Materialien wandern in den per-Slot
+    // Header des Objekt-Tensors (statue_metallic/sdf_grid_size/statue_center
+    // entfallen hier).
     pub bounding_sphere_radius_offset: F, // Proximity-Schranke (default 0.1)
 }
 

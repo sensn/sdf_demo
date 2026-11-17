@@ -122,12 +122,6 @@ let open = gui.accordion_state.read(cx).mat_open.clone(); // 🟢 Nutzt mat_open
                             div()
                                 .text_color(rgb(MUTED))
                                 .text_xs()
-                                .child("Statue PBR (ID 2)")
-                                .into_any_element(),
-                            slider_row("Statue Metallic", &gui.statue_metallic_slider, s.statue_metallic).into_any_element(),
-                            div()
-                                .text_color(rgb(MUTED))
-                                .text_xs()
                                 .child("Pillar PBR (ID 1)")
                                 .into_any_element(),
                             slider_row("Pillar Roughness", &gui.pillar_roughness_slider, s.pillar_roughness).into_any_element(),

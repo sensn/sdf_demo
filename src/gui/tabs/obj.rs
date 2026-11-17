@@ -124,21 +124,10 @@ let open = gui.accordion_state.read(cx).obj_open.clone(); // 🟢 Nutzt obj_open
                         ],
                     ))
                     .item(acc_item(
-                        "SDF Grid Space",
+                        "Mesh Backing",
                         open[3],
                         vec![
-                            slider_row("SDF Grid Size", &gui.sdf_grid_size_slider, s.sdf_grid_size).into_any_element(),
                             slider_row("Mesh Scale Factor", &gui.mesh_scale_factor_slider, s.mesh_scale_factor).into_any_element(),
-                        ],
-                    ))
-                    .item(acc_item(
-                        "Transformations & Bounds",
-                        open[4],
-                        vec![
-                            slider_row("Statue Center X", &gui.statue_center_x_slider, s.statue_center_x).into_any_element(),
-                            slider_row("Statue Center Y", &gui.statue_center_y_slider, s.statue_center_y).into_any_element(),
-                            slider_row("Statue Center Z", &gui.statue_center_z_slider, s.statue_center_z).into_any_element(),
-                            slider_row("Bounding Sphere Offset", &gui.bounding_sphere_radius_offset_slider, s.bounding_sphere_radius_offset).into_any_element(),
                         ],
                     ))
             )

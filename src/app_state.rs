@@ -109,14 +109,31 @@ pub struct ApplicationState {
     pub reflection_max_steps: u32,     // Sekundär-Schritte (8..64)
     pub reflection_roughness_gate: f32, // Aktivierungsschwelle (0.05..1.0)
     pub fresnel_strength_factor: f32,  // Reflexions-Stärke (0.0..1.0)
-    pub statue_metallic: f32,          // Statue PBR (ID 2)
     pub pillar_roughness: f32,         // Pfeiler PBR (ID 1)
 
+    // 🟢 SDF-OBJEKT-TENSOR: N Grid-Objekt-Slots (Analogie zum dynamischen
+    // Slot-Mechanismus). Jeder Slot: Pfad zum gebackenen Grid (leer =
+    // inaktiv) + Transform + Albedo/PBR. Parallele Vektoren, Index =
+    // Slot-Index (0..MAX_SDF_OBJECTS).
+    pub sdf_paths: Vec<String>,
+    pub sdf_active: Vec<bool>,
+    pub sdf_sizes: Vec<f32>,
+    pub sdf_center_x: Vec<f32>,
+    pub sdf_center_y: Vec<f32>,
+    pub sdf_center_z: Vec<f32>,
+    pub sdf_rot_x: Vec<f32>,
+    pub sdf_rot_y: Vec<f32>,
+    pub sdf_rot_z: Vec<f32>,
+    pub sdf_r: Vec<f32>,
+    pub sdf_g: Vec<f32>,
+    pub sdf_b: Vec<f32>,
+    pub sdf_roughness: Vec<f32>,
+    pub sdf_metallic: Vec<f32>,
+    pub sdf_emissive: Vec<f32>,
+    pub sdf_specular: Vec<f32>,
+    pub current_selected_sdf_object: usize,
+
     // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
-    pub sdf_grid_size: f32,                 // Grid-Ausdehnung (1.0..16.0)
-    pub statue_center_x: f32,               // Statue-Zentrum X
-    pub statue_center_y: f32,               // Statue-Zentrum Y (default -1.4)
-    pub statue_center_z: f32,               // Statue-Zentrum Z
     pub bounding_sphere_radius_offset: f32, // Proximity-Schranke (default 0.1)
     pub mesh_scale_factor: f32,             // Mesh-Normalisierung (0.1..1.0, default 0.8)
 }
@@ -223,14 +240,35 @@ impl Default for ApplicationState {
             reflection_max_steps: 32,
             reflection_roughness_gate: 0.25,
             fresnel_strength_factor: 0.35,
-            statue_metallic: 0.8,
             pillar_roughness: 0.8,
 
+            // 🟢 SDF-OBJEKT-TENSOR-Defaults: Slot 1 = Statue (Ex-Verhalten
+            // 1:1 erhalten: Zentrum (0,-1.4,0), Größe 4.0, Albedo
+            // (0.85,0.7,0.3), roughness 0.35, metallic 0.8). Slots 2..4 inaktiv.
+            sdf_paths: vec![
+                "assets/statue.obj".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ],
+            sdf_active: vec![true, false, false, false],
+            sdf_sizes: vec![4.0, 4.0, 4.0, 4.0],
+            sdf_center_x: vec![0.0, 3.0, -3.0, 0.0],
+            sdf_center_y: vec![-1.4, -1.4, -1.4, -1.4],
+            sdf_center_z: vec![0.0, 0.0, 0.0, 3.0],
+            sdf_rot_x: vec![0.0, 0.0, 0.0, 0.0],
+            sdf_rot_y: vec![0.0, 0.0, 0.0, 0.0],
+            sdf_rot_z: vec![0.0, 0.0, 0.0, 0.0],
+            sdf_r: vec![0.85, 0.7, 0.6, 0.6],
+            sdf_g: vec![0.7, 0.8, 0.7, 0.7],
+            sdf_b: vec![0.3, 0.85, 0.75, 0.75],
+            sdf_roughness: vec![0.35, 0.4, 0.4, 0.4],
+            sdf_metallic: vec![0.8, 0.3, 0.3, 0.3],
+            sdf_emissive: vec![0.0, 0.0, 0.0, 0.0],
+            sdf_specular: vec![0.5, 0.5, 0.5, 0.5],
+            current_selected_sdf_object: 0,
+
             // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration-Defaults
-            sdf_grid_size: 4.0,
-            statue_center_x: 0.0,
-            statue_center_y: -1.4,
-            statue_center_z: 0.0,
             bounding_sphere_radius_offset: 0.1,
             mesh_scale_factor: 0.8,
         }
@@ -243,6 +281,7 @@ use crate::kernel::{
 };
 // 🟢 Bringe den zentralen Typ-Alias in den Scope (Passe den Pfad ggf. an deine Struktur an)
  use crate::gpu::GpuFloat;
+use std::sync::Arc;
 
 
 impl ApplicationState {
@@ -311,14 +350,81 @@ pub fn scene_data(&self) -> Vec<GpuFloat> {
         packed_data[r_base + 1] = *self.slot_rot_y.get(i).unwrap_or(&0.0_f32) as GpuFloat;
         packed_data[r_base + 2] = *self.slot_rot_z.get(i).unwrap_or(&0.0_f32) as GpuFloat;
     }
-    
-    // PLAN STEP 2/3: SDF-Statuen-Grid laden
-    let sdf_grid = crate::sdf_preprocessor::load_or_bake_sdf("assets/statue.obj", self.mesh_scale_factor);
-    
-    // Mappe das f32-Voxel-Grid dynamisch auf den GpuFloat-Typ um beim Anhängen.
-    packed_data.extend(sdf_grid.iter().map(|&val| val as GpuFloat));
-    
+
+    // 🟢 SDF-OBJEKT-TENSOR: Das gebackene Grid hängt NICHT mehr am
+    // Mega-Scene-Buffer — es lebt im separaten Objekt-Tensor
+    // (siehe sdf_objects_data()). Die Größe ist wieder 1500 f32.
     packed_data
+}
+
+/// 🟢 SDF-OBJEKT-TENSOR: Packt die N Grid-Objekt-Slots in den separaten
+/// Objekt-Tensor. Layout (doc/feature/SDF_OBJECT_TENSOR.md):
+/// `[ Header 0 (Stride 24) ]…[ Header N-1 ][ Grid 0 (64³) ]…[ Grid N-1 ]`
+///
+/// Header (f32): active, res, size, pad, center(3)+pad, rot(3)+pad,
+/// albedo(3)+roughness, metallic+emissive+specular+pad.
+/// Grids kommen aus dem Prozess-Cache (`get_or_bake_grid`) — leere/
+/// inaktive Slots schreiben ein "weit weg"-Grid (d = 1e6).
+pub fn sdf_objects_data(&self) -> Vec<GpuFloat> {
+    use crate::gpu::{MAX_SDF_OBJECTS, SDF_HEADER_STRIDE, SDF_GRID_COUNT};
+
+    const N: usize = MAX_SDF_OBJECTS;
+    let grid_count = SDF_GRID_COUNT;
+    let total = N * SDF_HEADER_STRIDE + N * grid_count;
+    let mut packed = vec![0.0_f32 as GpuFloat; total];
+
+    // Leeres "weit weg"-Grid für inaktive Slots (prozessweit geteilt).
+    static EMPTY_GRID: std::sync::OnceLock<Arc<Vec<f32>>> = std::sync::OnceLock::new();
+    let empty = EMPTY_GRID.get_or_init(|| Arc::new(vec![1.0e6_f32; grid_count]));
+
+    let mut grids: Vec<Arc<Vec<f32>>> = Vec::with_capacity(N);
+    for slot in 0..N {
+        let path = self.sdf_paths.get(slot).map(|s| s.as_str()).unwrap_or("");
+        let scale = self.mesh_scale_factor;
+        if !path.is_empty() && self.sdf_active.get(slot).copied().unwrap_or(false) {
+            grids.push(crate::sdf_preprocessor::get_or_bake_grid(path, scale));
+        } else {
+            grids.push(empty.clone());
+        }
+    }
+
+    for slot in 0..N {
+        // --- Header (Stride 24) ---
+        let hdr = slot * SDF_HEADER_STRIDE;
+        let active = self.sdf_active.get(slot).copied().unwrap_or(false)
+            && !self.sdf_paths.get(slot).map(|s| s.is_empty()).unwrap_or(true);
+        packed[hdr]     = if active { 1.0 as GpuFloat } else { 0.0 as GpuFloat };
+        packed[hdr + 1] = crate::gpu::SDF_GRID_RES as f32 as GpuFloat; // res
+        packed[hdr + 2] = *self.sdf_sizes.get(slot).unwrap_or(&4.0) as GpuFloat;
+        packed[hdr + 3] = 0.0 as GpuFloat; // pad
+        packed[hdr + 4] = *self.sdf_center_x.get(slot).unwrap_or(&0.0) as GpuFloat;
+        packed[hdr + 5] = *self.sdf_center_y.get(slot).unwrap_or(&0.0) as GpuFloat;
+        packed[hdr + 6] = *self.sdf_center_z.get(slot).unwrap_or(&0.0) as GpuFloat;
+        packed[hdr + 7] = 0.0 as GpuFloat; // pad
+        packed[hdr + 8]  = *self.sdf_rot_x.get(slot).unwrap_or(&0.0) as GpuFloat;
+        packed[hdr + 9]  = *self.sdf_rot_y.get(slot).unwrap_or(&0.0) as GpuFloat;
+        packed[hdr + 10] = *self.sdf_rot_z.get(slot).unwrap_or(&0.0) as GpuFloat;
+        packed[hdr + 11] = 0.0 as GpuFloat; // pad
+        packed[hdr + 12] = *self.sdf_r.get(slot).unwrap_or(&0.85) as GpuFloat;
+        packed[hdr + 13] = *self.sdf_g.get(slot).unwrap_or(&0.7) as GpuFloat;
+        packed[hdr + 14] = *self.sdf_b.get(slot).unwrap_or(&0.3) as GpuFloat;
+        packed[hdr + 15] = *self.sdf_roughness.get(slot).unwrap_or(&0.35) as GpuFloat;
+        packed[hdr + 16] = *self.sdf_metallic.get(slot).unwrap_or(&0.8) as GpuFloat;
+        packed[hdr + 17] = *self.sdf_emissive.get(slot).unwrap_or(&0.0) as GpuFloat;
+        packed[hdr + 18] = *self.sdf_specular.get(slot).unwrap_or(&0.5) as GpuFloat;
+        // 19..23 pad — bleiben 0 (vec-initialisiert)
+    }
+
+    // --- Grids hinter den Headern ---
+    for slot in 0..N {
+        let g_base = N * SDF_HEADER_STRIDE + slot * grid_count;
+        let grid = &grids[slot];
+        for (k, val) in grid.iter().enumerate() {
+            packed[g_base + k] = *val as GpuFloat;
+        }
+    }
+
+    packed
 }
     /// Umwelt-Struct (ersetzt Tensor 4 / env_data()[16]): Licht, Farben, Nebel.
     /// fog_enabled als u32-Flag 0/1 (params3) statt f32.
@@ -417,17 +523,9 @@ pub fn scene_data(&self) -> Vec<GpuFloat> {
             reflection_max_steps: self.reflection_max_steps, // bleibt u32 / Ganzzahl
             reflection_roughness_gate: self.reflection_roughness_gate as GpuFloat,
             fresnel_strength_factor: self.fresnel_strength_factor as GpuFloat,
-            statue_metallic: self.statue_metallic as GpuFloat,
             pillar_roughness: self.pillar_roughness as GpuFloat,
-            
-            // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration
-            sdf_grid_size: self.sdf_grid_size as GpuFloat,
-            statue_center: GpuVec3Launch::<GpuFloat> {
-                x: self.statue_center_x as GpuFloat,
-                y: self.statue_center_y as GpuFloat,
-                z: self.statue_center_z as GpuFloat,
-                _pad: 0.0_f32 as GpuFloat,
-            },
+
+            // 🟢 SDF-OBJEKT-TENSOR: Zentrum/Größe/PBR pro Slot im Objekt-Tensor.
             bounding_sphere_radius_offset: self.bounding_sphere_radius_offset as GpuFloat,
         }
     }

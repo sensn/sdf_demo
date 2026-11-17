@@ -56,7 +56,8 @@ pub enum GuiTab {
     Architecture,
     Fold,
     Material,
-    Object, // 🟢 NEU: Objekt-Position/Scale/Rotation
+    Object, // 🟢 Objekt-Position/Scale/Rotation (dynamische Slots)
+    Sdf,    // 🟢 SDF-OBJEKT-TENSOR: Grid-Slots (Load/Transform/PBR)
     Controls,
 }
 
@@ -77,6 +78,8 @@ pub struct AccordionUiState {
     pub mat_open: Vec<bool>,
     /// Obj-Tab: [0] = Position, [1] = Scale, [2] = Rotation, [3] = SDF Grid Space, [4] = Transformations & Bounds
     pub obj_open: Vec<bool>,
+    /// 🟢 SDF-Tab: [0] = Position, [1] = Rotation, [2] = Size & Grid, [3] = Material, [4] = Global
+    pub sdf_open: Vec<bool>,
     /// Ctrl-Tab: [0] = Camera, [1] = Rendering, [2] = Key Bindings
     pub ctrl_open: Vec<bool>,
 }
@@ -152,14 +155,24 @@ pub struct GuiState {
     pub reflection_max_steps_slider: Entity<SliderState>,
     pub reflection_roughness_gate_slider: Entity<SliderState>,
     pub fresnel_strength_factor_slider: Entity<SliderState>,
-    pub statue_metallic_slider: Entity<SliderState>,
     pub pillar_roughness_slider: Entity<SliderState>,
-    // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
-    pub sdf_grid_size_slider: Entity<SliderState>,
+    // 🟢 SDF-OBJEKT-TENSOR: Pro-Slot-Slider (editieren sdf_*[current_selected_sdf_object])
+    pub sdf_center_x_slider: Entity<SliderState>,
+    pub sdf_center_y_slider: Entity<SliderState>,
+    pub sdf_center_z_slider: Entity<SliderState>,
+    pub sdf_size_slider: Entity<SliderState>,
+    pub sdf_rot_x_slider: Entity<SliderState>,
+    pub sdf_rot_y_slider: Entity<SliderState>,
+    pub sdf_rot_z_slider: Entity<SliderState>,
+    pub sdf_r_slider: Entity<SliderState>,
+    pub sdf_g_slider: Entity<SliderState>,
+    pub sdf_b_slider: Entity<SliderState>,
+    pub sdf_roughness_slider: Entity<SliderState>,
+    pub sdf_metallic_slider: Entity<SliderState>,
+    pub sdf_emissive_slider: Entity<SliderState>,
+    pub sdf_specular_slider: Entity<SliderState>,
+    // 🟢 PARAM-GUI: Objekt / Back-Konfiguration (global, SDF-Tab)
     pub mesh_scale_factor_slider: Entity<SliderState>,
-    pub statue_center_x_slider: Entity<SliderState>,
-    pub statue_center_y_slider: Entity<SliderState>,
-    pub statue_center_z_slider: Entity<SliderState>,
     pub bounding_sphere_radius_offset_slider: Entity<SliderState>,
 
     /// UI-Zustand
@@ -287,21 +300,39 @@ impl GuiState {
             cx.new(|_| SliderState::new().min(0.05).max(1.0).step(0.01).default_value(0.25));
         let fresnel_strength_factor_slider =
             cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.35));
-        let statue_metallic_slider =
-            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.8));
         let pillar_roughness_slider =
             cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.8));
-        // --- 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
-        let sdf_grid_size_slider =
+        // --- 🟢 SDF-OBJEKT-TENSOR: Pro-Slot-Slider (editieren den gewählten Slot)
+        let sdf_center_x_slider =
+            cx.new(|_| SliderState::new().min(-10.0).max(10.0).step(0.1).default_value(0.0));
+        let sdf_center_y_slider =
+            cx.new(|_| SliderState::new().min(-5.0).max(5.0).step(0.1).default_value(-1.4));
+        let sdf_center_z_slider =
+            cx.new(|_| SliderState::new().min(-10.0).max(10.0).step(0.1).default_value(0.0));
+        let sdf_size_slider =
             cx.new(|_| SliderState::new().min(1.0).max(16.0).step(0.1).default_value(4.0));
+        let sdf_rot_x_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(6.283).step(0.01).default_value(0.0));
+        let sdf_rot_y_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(6.283).step(0.01).default_value(0.0));
+        let sdf_rot_z_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(6.283).step(0.01).default_value(0.0));
+        let sdf_r_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.85));
+        let sdf_g_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.7));
+        let sdf_b_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.3));
+        let sdf_roughness_slider =
+            cx.new(|_| SliderState::new().min(0.01).max(1.0).step(0.01).default_value(0.35));
+        let sdf_metallic_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.8));
+        let sdf_emissive_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(10.0).step(0.1).default_value(0.0));
+        let sdf_specular_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.5));
         let mesh_scale_factor_slider =
             cx.new(|_| SliderState::new().min(0.1).max(1.0).step(0.01).default_value(0.8));
-        let statue_center_x_slider =
-            cx.new(|_| SliderState::new().min(-10.0).max(10.0).step(0.1).default_value(0.0));
-        let statue_center_y_slider =
-            cx.new(|_| SliderState::new().min(-5.0).max(5.0).step(0.1).default_value(-1.4));
-        let statue_center_z_slider =
-            cx.new(|_| SliderState::new().min(-10.0).max(10.0).step(0.1).default_value(0.0));
         let bounding_sphere_radius_offset_slider =
             cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.1));
 
@@ -433,27 +464,68 @@ impl GuiState {
         subscribe_slider(cx, &fresnel_strength_factor_slider, state, |s, v| {
             s.fresnel_strength_factor = v;
         });
-        subscribe_slider(cx, &statue_metallic_slider, state, |s, v| {
-            s.statue_metallic = v;
-        });
         subscribe_slider(cx, &pillar_roughness_slider, state, |s, v| {
             s.pillar_roughness = v;
         });
-        // --- 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
-        subscribe_slider(cx, &sdf_grid_size_slider, state, |s, v| {
-            s.sdf_grid_size = v;
+        // --- 🟢 SDF-OBJEKT-TENSOR: Pro-Slot-Subscriptions (wie PBR-Slots)
+        subscribe_slider(cx, &sdf_center_x_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_center_x.len() { s.sdf_center_x[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_center_y_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_center_y.len() { s.sdf_center_y[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_center_z_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_center_z.len() { s.sdf_center_z[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_size_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_sizes.len() { s.sdf_sizes[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_rot_x_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_rot_x.len() { s.sdf_rot_x[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_rot_y_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_rot_y.len() { s.sdf_rot_y[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_rot_z_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_rot_z.len() { s.sdf_rot_z[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_r_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_r.len() { s.sdf_r[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_g_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_g.len() { s.sdf_g[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_b_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_b.len() { s.sdf_b[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_roughness_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_roughness.len() { s.sdf_roughness[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_metallic_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_metallic.len() { s.sdf_metallic[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_emissive_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_emissive.len() { s.sdf_emissive[i] = v; }
+        });
+        subscribe_slider(cx, &sdf_specular_slider, state, |s, v| {
+            let i = s.current_selected_sdf_object;
+            if i < s.sdf_specular.len() { s.sdf_specular[i] = v; }
         });
         subscribe_slider(cx, &mesh_scale_factor_slider, state, |s, v| {
             s.mesh_scale_factor = v;
-        });
-        subscribe_slider(cx, &statue_center_x_slider, state, |s, v| {
-            s.statue_center_x = v;
-        });
-        subscribe_slider(cx, &statue_center_y_slider, state, |s, v| {
-            s.statue_center_y = v;
-        });
-        subscribe_slider(cx, &statue_center_z_slider, state, |s, v| {
-            s.statue_center_z = v;
         });
         subscribe_slider(cx, &bounding_sphere_radius_offset_slider, state, |s, v| {
             s.bounding_sphere_radius_offset = v;
@@ -469,6 +541,7 @@ impl GuiState {
     fold_open: vec![true, false],             // Beispiel-Länge für Fold
     mat_open: vec![true, true, true],         // Startet offen/teilweise offen
     obj_open: vec![true, true, true, true, true],
+    sdf_open: vec![true, false, false, true, false], // SDF-Tab: Position + Material offen
     ctrl_open: vec![true, true, true],        // 🟢 HIER: Alle 3 Gruppen standardmäßig komplett offen!
 });
 
@@ -525,13 +598,22 @@ impl GuiState {
             reflection_max_steps_slider,
             reflection_roughness_gate_slider,
             fresnel_strength_factor_slider,
-            statue_metallic_slider,
             pillar_roughness_slider,
-            sdf_grid_size_slider,
+            sdf_center_x_slider,
+            sdf_center_y_slider,
+            sdf_center_z_slider,
+            sdf_size_slider,
+            sdf_rot_x_slider,
+            sdf_rot_y_slider,
+            sdf_rot_z_slider,
+            sdf_r_slider,
+            sdf_g_slider,
+            sdf_b_slider,
+            sdf_roughness_slider,
+            sdf_metallic_slider,
+            sdf_emissive_slider,
+            sdf_specular_slider,
             mesh_scale_factor_slider,
-            statue_center_x_slider,
-            statue_center_y_slider,
-            statue_center_z_slider,
             bounding_sphere_radius_offset_slider,
             tab_state,
             accordion_state,
@@ -610,14 +692,29 @@ impl GuiState {
         sync_one(&self.reflection_max_steps_slider, state.reflection_max_steps as f32, window, cx);
         sync_one(&self.reflection_roughness_gate_slider, state.reflection_roughness_gate, window, cx);
         sync_one(&self.fresnel_strength_factor_slider, state.fresnel_strength_factor, window, cx);
-        sync_one(&self.statue_metallic_slider, state.statue_metallic, window, cx);
         sync_one(&self.pillar_roughness_slider, state.pillar_roughness, window, cx);
-        // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
-        sync_one(&self.sdf_grid_size_slider, state.sdf_grid_size, window, cx);
+        // 🟢 SDF-OBJEKT-TENSOR: Slider zeigen die Werte des gewählten Grid-Slots.
+        let ssel = state
+            .current_selected_sdf_object
+            .min(state.sdf_center_x.len().saturating_sub(1));
+        if ssel < state.sdf_center_x.len() {
+            sync_one(&self.sdf_center_x_slider, state.sdf_center_x[ssel], window, cx);
+            sync_one(&self.sdf_center_y_slider, state.sdf_center_y[ssel], window, cx);
+            sync_one(&self.sdf_center_z_slider, state.sdf_center_z[ssel], window, cx);
+            sync_one(&self.sdf_size_slider, state.sdf_sizes[ssel], window, cx);
+            sync_one(&self.sdf_rot_x_slider, state.sdf_rot_x[ssel], window, cx);
+            sync_one(&self.sdf_rot_y_slider, state.sdf_rot_y[ssel], window, cx);
+            sync_one(&self.sdf_rot_z_slider, state.sdf_rot_z[ssel], window, cx);
+            sync_one(&self.sdf_r_slider, state.sdf_r[ssel], window, cx);
+            sync_one(&self.sdf_g_slider, state.sdf_g[ssel], window, cx);
+            sync_one(&self.sdf_b_slider, state.sdf_b[ssel], window, cx);
+            sync_one(&self.sdf_roughness_slider, state.sdf_roughness[ssel], window, cx);
+            sync_one(&self.sdf_metallic_slider, state.sdf_metallic[ssel], window, cx);
+            sync_one(&self.sdf_emissive_slider, state.sdf_emissive[ssel], window, cx);
+            sync_one(&self.sdf_specular_slider, state.sdf_specular[ssel], window, cx);
+        }
+        // 🟢 PARAM-GUI: Globale Back-Konfiguration (SDF-Tab)
         sync_one(&self.mesh_scale_factor_slider, state.mesh_scale_factor, window, cx);
-        sync_one(&self.statue_center_x_slider, state.statue_center_x, window, cx);
-        sync_one(&self.statue_center_y_slider, state.statue_center_y, window, cx);
-        sync_one(&self.statue_center_z_slider, state.statue_center_z, window, cx);
         sync_one(&self.bounding_sphere_radius_offset_slider, state.bounding_sphere_radius_offset, window, cx);
     }
 }

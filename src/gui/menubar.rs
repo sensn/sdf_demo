@@ -17,7 +17,7 @@ use wgpui_kit::{
     App, IntoElement, Styled, Window,Anchor, 
 };
 
-wgpui_kit::actions!(tensor_menu, [ResetScene, ExitApp, ToggleAO, ToggleKeyLight]);
+wgpui_kit::actions!(tensor_menu, [ResetScene, ExitApp, ToggleAO, ToggleKeyLight, LoadSdfObject]);
 
 use crate::app_state::ApplicationState;
 use super::GuiState;
@@ -36,6 +36,7 @@ pub fn menubar(
     let state_reset = state.clone();
     let state_ao = state.clone();
     let state_key = state.clone();
+    let state_load = state.clone(); // extra clone for LoadSdfObject
 
     // 🟢 GLOBAL HANDLER: Fängt die Menü-Aktionen zentral und sicher ab
     cx.on_action(move |_: &ResetScene, _| {
@@ -58,8 +59,26 @@ pub fn menubar(
         }
     });
 
-    cx.on_action(|_: &ExitApp, _| {
+    cx.on_action(move |_: &ExitApp, _| {
         std::process::exit(0);
+    });
+
+    cx.on_action(move |_: &LoadSdfObject, cx| {
+        let state = state_load.clone();
+        cx.spawn(async move |_cx| {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("OBJ Mesh", &["obj"])
+                .pick_file()
+            {
+                if let Ok(mut s) = state.lock() {
+                    let slot = s.current_selected_sdf_object;
+                    if slot < s.sdf_paths.len() {
+                        s.sdf_paths[slot] = path.display().to_string();
+                        s.sdf_active[slot] = true;
+                    }
+                }
+            }
+        }).detach();
     });
 
     div()
@@ -100,6 +119,12 @@ pub fn menubar(
                         })
                         
                         // Trennlinie für visuelle Ordnung
+                        .separator()
+                        
+                        // Regulärer, flacher Sammeleintrag im Hauptzweig
+                        .menu("SDF-Objekt laden…", Box::new(LoadSdfObject))
+                        
+                        // Trennlinie
                         .separator()
                         
                         // Regulärer, flacher Sammeleintrag im Hauptzweig

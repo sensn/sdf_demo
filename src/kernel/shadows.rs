@@ -7,7 +7,7 @@ use cubecl::prelude::*;
 
 use super::scene::scene_sdf;
 use super::statue_grid::scene_map_with_material;
-use super::types::{ArchParams, FoldParams, GpuVec3, Vec3};
+use super::types::{ArchParams, FoldParams, Vec3};
 
 #[cube]
 pub fn calculate_soft_shadow<F: Float>(
@@ -16,16 +16,12 @@ pub fn calculate_soft_shadow<F: Float>(
     time: F,
     blend_factor: F,
     active_slots: u32,
-    scene: &Tensor<F>, // 💡 KORREKTUR: Jetzt die direkte Tensor-Referenz statt der Slices
+    scene: &Tensor<F>, // Mega-Scene-Tensor (Slots/Materials/Rotations)
     arch: ArchParams<F>,
     fold: FoldParams<F>,
-    // 🟢 PLAN STEP 7: Pfeiler/Statue werfen ebenfalls Schatten.
-    pillar_spacing: F,
-    pillar_height: F,
-    grid_res: u32,
-    grid_size: F,
-    statue_center: GpuVec3<F>,
-    bounding_sphere_radius_offset: F,
+    // 🟢 SDF-OBJEKT-TENSOR: Grid-Slots werfen ebenfalls Schatten.
+    objects: &Tensor<F>,
+    bound_offset: F,
     shadow_softness_k: F,
 ) -> F {
     let mut res = F::new(1.0);
@@ -50,12 +46,10 @@ pub fn calculate_soft_shadow<F: Float>(
         );
         let mut h = sdf_res.d;
         
-        // 🟢 PLAN STEP 7: Statue blockiert den Schattenstrahl ebenfalls
-        // (KEIN Sphere-Bound — sonst Phantom-Schatten-Ring um die Statue).
-        // 💡 KORREKTUR: `scene` anstelle des alten `sdf_grid` Slices weiterreichen + Turbofisch ergänzt
+        // 🟢 SDF-OBJEKT-TENSOR: Grid-Slots blockieren den Schattenstrahl
+        // ebenfalls (KEIN Sphere-Bound — sonst Phantom-Schatten-Ring).
         let plan_res = scene_map_with_material::<F>(
-            p, pillar_spacing, pillar_height, scene, grid_res, grid_size, false, 
-            statue_center.clone(), bounding_sphere_radius_offset,
+            p, objects, bound_offset, false,
         );
         if plan_res.d < h {
             h = plan_res.d;

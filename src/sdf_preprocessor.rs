@@ -196,3 +196,43 @@ pub fn load_or_bake_sdf(obj_path: &str, mesh_scale_factor: f32) -> Vec<f32> {
     let _ = save_sdf_cache(&cache_path, &data);
     data
 }
+
+// =========================================================================
+// 🟢 SDF-OBJEKT-TENSOR: In-Memory-Cache (Arc-geteilt, mehre Slots können
+// dasselbe Grid referenzieren ohne Doppel-Bake).
+// =========================================================================
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Prozessweiter Grid-Cache: Key `(obj_path, mesh_scale_factor)`.
+/// Der Mutex schützt die HashMap (nicht die Grids selbst — die sind
+/// hinter `Arc` unveränderlich).
+static GRID_CACHE: OnceLock<Mutex<HashMap<(String, u32), Arc<Vec<f32>>>>> = OnceLock::new();
+
+fn grid_cache() -> &'static Mutex<HashMap<(String, u32), Arc<Vec<f32>>>> {
+    GRID_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Lädt (oder bäckt) das SDF-Grid für `obj_path` und teilt es als
+/// `Arc` — mehrfache Slots mit derselben Quelle teilen einen Bake.
+/// Cache-Hit verhindert wiederholtes Lesen der ~1 MB-Binärdatei pro Frame.
+///
+/// 🔒 Prozessweiter Cache: Key `(obj_path, mesh_scale_factor)`. Der
+/// Cache-Key schließt den Scale-Faktor ein, damit unterschiedliche
+/// Bakes (nach GUI-Änderung des Faktors) nicht kollidieren. Der alte
+/// `.sdfcache`-Header speichert den Scale nicht — ein geänderter Faktor
+/// erfordert weiterhin das manuelle Löschen der Cache-Datei.
+pub fn get_or_bake_grid(obj_path: &str, mesh_scale_factor: f32) -> Arc<Vec<f32>> {
+    let key = (obj_path.to_string(), mesh_scale_factor.to_bits());
+    if let Ok(cache) = grid_cache().lock() {
+        if let Some(grid) = cache.get(&key) {
+            return grid.clone();
+        }
+    }
+    let grid = Arc::new(load_or_bake_sdf(obj_path, mesh_scale_factor));
+    if let Ok(mut cache) = grid_cache().lock() {
+        cache.insert(key, grid.clone());
+    }
+    grid
+}

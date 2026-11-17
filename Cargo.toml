@@ -20,6 +20,8 @@ evdev = "0.12"
 crossbeam-channel = "0.5"
 tobj = "4.0.5"
 mesh_to_sdf = "0.4.0"
+# 🟢 SDF-OBJEKT-TENSOR: nativer Datei-Dialog (läuft im Hintergrund-Thread)
+rfd = "0.16"
 
 # Aktiviere die benötigten Features für cubek
 cubek = { version = "0.3.0", features = ["tile"] }

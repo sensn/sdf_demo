@@ -6,7 +6,7 @@ use cubecl::frontend::CubeType;
 use cubecl::prelude::*;
 
 
-use crate::gpu::{MATERIALS_COUNT, ROTATIONS_COUNT, SDF_GRID_COUNT, SDF_GRID_RES, SLOTS_COUNT};
+use crate::gpu::{SDF_GRID_RES, MATERIALS_COUNT, ROTATIONS_COUNT, SLOTS_COUNT};
 
 use super::ao::calculate_ao;
 use super::fog::integrate_volumetric_fog;
@@ -14,7 +14,7 @@ use super::pbr::{aces_tonemap, cook_torrance_light};
 use super::reflection::trace_reflection;
 use super::scene::{scene_sdf, scene_sdf_normal};
 use super::shadows::calculate_soft_shadow;
-use super::statue_grid::{calculate_normal, scene_map_with_material};
+use super::statue_grid::{calculate_normal, scene_map_with_material, sdf_object_pbr};
 use super::types::{ArchParams, CameraSettings, EnvSettings, FoldParams, RenderSettings, Vec3};
 //
 // ALTE IMPORTS ENTFERNEN UND DURCH DIESE ERSETZEN:
@@ -71,7 +71,8 @@ let strategy = if vector_width >= 4 {
 #[cube(launch)] // 💡 Nutzt das Standard-Launch-Makro
 pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das Generic zurück!
     output: &mut Tensor<F>,
-    scene: &Tensor<F>, // 📦 Der gepackte Mega-Buffer wird als Tensor-Referenz durchgereicht
+    scene: &Tensor<F>, // 📦 Mega-Scene-Tensor [slots|materials|rotations]
+    objects: &Tensor<F>, // 🟢 SDF-OBJEKT-TENSOR [header*N|grid*N]
     camera: CameraSettings<F>,
     env: EnvSettings<F>,
     arch: ArchParams<F>,
@@ -101,11 +102,12 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
     let sdf_grid: &[f32] = &scene.slice(SDF_GRID_START, SDF_GRID_END);
     */
     let grid_res = u32::cast_from(SDF_GRID_RES);
-    let grid_size = render.sdf_grid_size;
+    let bound_offset = render.bounding_sphere_radius_offset;
     let pillar_spacing = fold.pillar_spacing;
     let pillar_height = fold.pillar_height;
-    let statue_center = render.statue_center;
-    let bounding_sphere_radius_offset = render.bounding_sphere_radius_offset;
+    // 🟢 SDF-OBJEKT-TENSOR: Zentrum/Größe/PBR kommen jetzt aus den
+    // per-Slot-Headern im Objekt-Tensor (statue_center/sdf_grid_size/
+    // statue_metallic aus RenderSettings entfallen).
 
   if x < w_val && y < h_val {
         // =========================================================================
@@ -221,24 +223,37 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
             hit_is_plan_obj = false;
 
             
-            // 🟢 PLAN STEP 5: Statue in die Primär-Map mischen.
-                       // 💡 KORREKTUR: Übergabe von `scene` anstelle des alten `sdf_grid` Slices
+            // 🟢 SDF-OBJEKT-TENSOR: Grid-Slots in die Primär-Map mischen.
             let plan_res = scene_map_with_material::<F>(
-                p.clone(), pillar_spacing, pillar_height, scene, grid_res, grid_size, true,
-                statue_center.clone(), bounding_sphere_radius_offset,
+                p.clone(), objects, bound_offset, true,
             );
             if plan_res.d < hit_d {
                 hit_d = plan_res.d;
-                // Nur als Statuen-Treffer zählen, wenn die Statue selbst die nächste Fläche ist.
+                // Nur als Grid-Treffer zählen, wenn ein Slot selbst die
+                // nächste Fläche ist (mat_id = 2 + slot).
                 hit_is_plan_obj = plan_res.mat_id > F::new(1.5);
-                let is_statue = plan_res.mat_id > F::new(1.5);
-                hit_r = select(is_statue, F::new(0.85), F::new(0.55));
-                hit_g = select(is_statue, F::new(0.7), F::new(0.52));
-                hit_b = select(is_statue, F::new(0.3), F::new(0.5));
-                hit_rough = select(is_statue, F::new(0.35), render.pillar_roughness);
-                hit_metal = select(is_statue, render.statue_metallic, F::new(0.0));
-                hit_emiss = F::new(0.0);
-                hit_spec = F::new(0.5);
+                let is_grid = plan_res.mat_id > F::new(1.5);
+                if is_grid {
+                    // Material aus dem Slot-Header (albedo + PBR).
+                    let pbr = sdf_object_pbr::<F>(objects, plan_res.mat_id);
+                    hit_r = pbr.r;
+                    hit_g = pbr.g;
+                    hit_b = pbr.b;
+                    hit_rough = pbr.roughness;
+                    hit_metal = pbr.metallic;
+                    hit_emiss = pbr.emissive;
+                    hit_spec = pbr.specular;
+                } else {
+                    // Bounding-Shell-Treffer: Pfeiler-Nahwerte (in der
+                    // Praxis trifft dann scene_sdf vor dem Break).
+                    hit_r = F::new(0.55);
+                    hit_g = F::new(0.52);
+                    hit_b = F::new(0.5);
+                    hit_rough = render.pillar_roughness;
+                    hit_metal = F::new(0.0);
+                    hit_emiss = F::new(0.0);
+                    hit_spec = F::new(0.5);
+                }
             }
             
             // 🟢 PLAN STEP 6: Glow-Akkumulation
@@ -277,10 +292,9 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
             let mut n_z = F::new(0.0);
             
             if hit_is_plan_obj {
-                // 💡 KORREKTUR: `scene` anstelle des Slices übergeben
+                // 🟢 SDF-OBJEKT-TENSOR
                 let n = calculate_normal::<F>(
-                    p.clone(), pillar_spacing, pillar_height, scene, grid_res, grid_size,
-                    statue_center.clone(), bounding_sphere_radius_offset,
+                    p.clone(), objects, bound_offset,
                 );
                 n_x = n.x;
                 n_y = n.y;
@@ -313,8 +327,7 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
                 // 💡 KORREKTUR: Übergabe von `scene` statt der Slices slots/materials/rotations/sdf_grid
                 let shadow_factor = calculate_soft_shadow::<F>(
                     offset_p, key_dir.clone(), t_val, b_factor, render.active_slots, scene,
-                    arch.clone(), fold.clone(), pillar_spacing, pillar_height, grid_res, grid_size,
-                    statue_center.clone(), bounding_sphere_radius_offset, env.shadow_softness_k,
+                    arch.clone(), fold.clone(), objects, bound_offset, env.shadow_softness_k,
                 );
                 key_visibility = shadow_factor;
             }
@@ -324,8 +337,7 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
                 // 💡 KORREKTUR: Übergabe von `scene` statt der Slices slots/materials/rotations/sdf_grid
                 ao_factor = calculate_ao::<F>(
                     p.clone(), normal.clone(), t_val, b_factor, render.active_slots, scene,
-                    arch.clone(), fold.clone(), pillar_spacing, pillar_height, grid_res, grid_size,
-                    statue_center.clone(), bounding_sphere_radius_offset, env.ao_iterations
+                    arch.clone(), fold.clone(), objects, bound_offset, env.ao_iterations
                 );
             }
 
@@ -404,13 +416,11 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
                     scene,
                     arch.clone(),
                     fold.clone(),
-                    grid_res,
-                    grid_size,
+                    objects,
+                    bound_offset,
                     Vec3::<F>::new(bg_r, bg_g, bg_b), // 💡 KORREKTUR: Turbofisch hinzugefügt
                     F::new(40.0),
                     render.reflection_max_steps,
-                    statue_center.clone(),
-                    bounding_sphere_radius_offset,
                     env.clone(),
                     render.clone(),
                 );

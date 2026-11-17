@@ -19,7 +19,7 @@ use cubecl_runtime::server::Handle;
 use cubecl_wgpu::{init_device, RuntimeOptions, WgpuRuntime, WgpuSetup};
 use cubecl_zspace::{Shape, Strides};
 use wgpui_kit::WgpuSurfaceHandle;
-
+use cubecl::prelude::flex32; 
 /// 🟢 ZENTRALE STEUERUNG FÜR DIE GPU-PRÄZISION
 /// Hier kannst du den Typ global auf `f32`, `f64` oder (falls vom Backend unterstützt) `f16` ändern.
 pub type GpuFloat = f32;  // Centralized precision switch
@@ -34,18 +34,23 @@ pub const SLOTS_COUNT: usize = MAX_SLOTS * 8;      // 800
 pub const MATERIALS_COUNT: usize = MAX_SLOTS * 4;  // 400
 pub const ROTATIONS_COUNT: usize = MAX_SLOTS * 3;  // 300
 pub const TOTAL_BUFFER_SIZE: usize = SLOTS_COUNT + MATERIALS_COUNT + ROTATIONS_COUNT; // 1500
-// 🟢 PLAN STEP 2/3: SDF-Statuen-Grid (64³ Voxel) wird an den
-// Mega-Scene-Buffer angehängt. Layout: [slots|materials|rotations|sdf_grid].
+
+// 🟢 SDF-OBJEKT-TENSOR: Eigenes Register für die N Grid-Objekt-Slots.
+// Layout: [ Header Slot 0 (Stride 24) ]…[ Header N-1 ][ Grid 0 ]…[ Grid N-1 ]
+pub const MAX_SDF_OBJECTS: usize = 4;
+pub const SDF_HEADER_STRIDE: usize = 24;
 pub const SDF_GRID_RES: usize = crate::sdf_preprocessor::SDF_GRID_RES; // 64
 pub const SDF_GRID_COUNT: usize = SDF_GRID_RES * SDF_GRID_RES * SDF_GRID_RES; // 262144
-pub const SDF_GRID_START: usize = TOTAL_BUFFER_SIZE; // 1500
-pub const TOTAL_SCENE_FLOATS: usize = TOTAL_BUFFER_SIZE + SDF_GRID_COUNT; // 263644
+pub const SDF_OBJECTS_FLOATS: usize =
+    MAX_SDF_OBJECTS * SDF_HEADER_STRIDE + MAX_SDF_OBJECTS * SDF_GRID_COUNT; // 1_048_672
+pub const TOTAL_SCENE_FLOATS: usize = TOTAL_BUFFER_SIZE; // 1500 (ohne Grids)
 
 // Byte-Größen (1x f32 = 4 Bytes)
 pub const SLOTS_BYTES: usize = SLOTS_COUNT * 4;      // 3200 Bytes
 pub const MATERIALS_BYTES: usize = MATERIALS_COUNT * 4;  // 1600 Bytes
 pub const ROTATIONS_BYTES: usize = ROTATIONS_COUNT * 4;  // 1200 Bytes
-pub const TOTAL_SCENE_BYTES: usize = TOTAL_SCENE_FLOATS * 4; // ~1.05 MB
+pub const TOTAL_SCENE_BYTES: usize = TOTAL_SCENE_FLOATS * 4; // 6000 Bytes
+pub const SDF_OBJECTS_BYTES: usize = SDF_OBJECTS_FLOATS * 4; // ~4.2 MB
 // =========================================================================
 
 /// Auflösungs-Uniform für den Screen-Shader (fs_main).
@@ -96,6 +101,8 @@ pub struct GpuPipeline {
     pub output_handle: Handle,
     // 📦 REFAKTORIERT: Ein einziger Mega-Buffer statt 3 Einzelslots!
     pub scene_handle: Handle, 
+    // 🟢 SDF-OBJEKT-TENSOR: Separater Storage-Buffer für die N Grid-Slots.
+    pub sdf_objects_handle: Handle,
 
     bind_group: Option<wgpu::BindGroup>,
 }
@@ -144,6 +151,7 @@ let output_handle = client.empty(output_byte_size(width, height));
 
 // 📦 2. Nur noch EIN Handle allokieren
 let scene_handle = client.empty(TOTAL_SCENE_BYTES);
+let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
         // --- wgpu-Blit: Raymarch-Buffer → Back-Buffer ---
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Screen Shader"),
@@ -238,6 +246,7 @@ let scene_handle = client.empty(TOTAL_SCENE_BYTES);
             resolution,
             output_handle,
             scene_handle, // 🟢 Jetzt kompakt verpackt
+            sdf_objects_handle, // 🟢 SDF-OBJEKT-TENSOR
             bind_group: None,
         };
         pipeline.rebuild_bind_group();
@@ -278,6 +287,7 @@ let scene_handle = client.empty(TOTAL_SCENE_BYTES);
         let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cubecl_device_id);
         let output_handle = client.empty(output_byte_size(width, height));
         let scene_handle = client.empty(TOTAL_SCENE_BYTES);
+        let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Screen Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -370,6 +380,7 @@ let scene_handle = client.empty(TOTAL_SCENE_BYTES);
             resolution,
             output_handle,
             scene_handle,
+            sdf_objects_handle,
             bind_group: None,
         };
         pipeline.rebuild_bind_group();
@@ -443,10 +454,12 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
         // meta/env/arch/fold/camera/render reisen als CubeLaunch-Structs im
         // Info-Uniform — kein write_buffer mehr nötig (params2/params4).
         // 📦 REFAKTORIERT & OPTIMIERT: 
-    // Alle 3 Register-Tabelle (Slots, Materials, Rotations) reisen jetzt 
-    // voll-ausgerichtet als ein einziger Mega-Buffer (6000 Bytes) zur GPU!
+    // Register-Tabelle (Slots, Materials, Rotations) reist als Mega-Buffer,
+    // die N SDF-Grid-Slots als eigener Objekt-Tensor.
     let packed_scene = s.scene_data();
     write(&self.scene_handle, bytemuck::cast_slice(&packed_scene));
+    let packed_objects = s.sdf_objects_data();
+    write(&self.sdf_objects_handle, bytemuck::cast_slice(&packed_objects));
 }
 
     /// Ein kompletter Frame: Raymarch-Kernel-Launch + Blit auf den
@@ -481,6 +494,15 @@ pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: Gp
         )
     };
     
+    // 🟢 SDF-OBJEKT-TENSOR: Zweiter Storage-Tensor (Header + Grids).
+    let objects_arg = unsafe {
+        cubecl::prelude::TensorArg::from_raw_parts(
+            self.sdf_objects_handle.clone(),
+            (&[SDF_OBJECTS_FLOATS]).into(),
+            (&[1usize]).into(),
+        )
+    };
+    
     // 🟢 KORREKTUR: Nutzt jetzt den generischen Typ-Alias statt des hartcodierten f32
     crate::kernel::raymarch_sdf_kernel::launch::<GpuFloat>(
         &self.client,
@@ -488,6 +510,7 @@ pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: Gp
         cube_dim,
         output_arg,
         scene_arg,
+        objects_arg,
         s.camera_launch(),
         s.env_launch(),
         s.arch_launch(),

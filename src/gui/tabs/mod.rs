@@ -4,7 +4,8 @@
 //! - `arch.rs`  — Tensor 5 (Architektur): Säulen & Raum / Bögen / Dekor
 //! - `fold.rs`  — Tensor 6 (Faltung): Zellgröße + Tempo
 //! - `mat.rs`   — PBR-Material-Tensor: Roughness/Metallic/Emissive/Specular pro Slot
-//! - `obj.rs`   — 🟢 NEU: Objekt-Tensor: Position/Scale/Rotation pro Slot
+//! - `obj.rs`   — 🟢 Objekt-Tensor: Position/Scale/Rotation pro Slot
+//! - `sdf.rs`   — 🟢 SDF-Objekt-Tensor: Grid-Slots (Load/Transform/PBR)
 //! - `ctrl.rs`  — Original-Steuerung: Kamera-Info, Schalter, Tasten-Hilfe
 mod arch;
 mod ctrl;
@@ -12,9 +13,11 @@ mod env;
 mod fold;
 mod mat;
 mod obj;
+mod sdf;
 pub(super) use arch::arch_tab;
 pub(super) use ctrl::ctrl_tab;
 pub(super) use env::env_tab;
 pub(super) use fold::fold_tab;
 pub(super) use mat::mat_tab;
 pub(super) use obj::obj_tab;
+pub(super) use sdf::sdf_tab;

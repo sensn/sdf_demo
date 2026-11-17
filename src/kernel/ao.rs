@@ -7,7 +7,7 @@ use cubecl::prelude::*;
 
 use super::scene::scene_sdf;
 use super::statue_grid::scene_map_with_material;
-use super::types::{ArchParams, FoldParams, GpuVec3, Vec3};
+use super::types::{ArchParams, FoldParams, Vec3};
 
 #[cube]
 pub fn calculate_ao<F: Float>(
@@ -16,16 +16,12 @@ pub fn calculate_ao<F: Float>(
     time: F,
     blend_factor: F,
     active_slots: u32,
-    scene: &Tensor<F>, // 💡 KORREKTUR: Jetzt die direkte Tensor-Referenz statt der Slices
+    scene: &Tensor<F>, // Mega-Scene-Tensor (Slots/Materials/Rotations)
     arch: ArchParams<F>,
     fold: FoldParams<F>,
-    // 🟢 PLAN STEP 7: Pfeiler/Statue tragen ebenfalls zur Okklusion bei.
-    pillar_spacing: F,
-    pillar_height: F,
-    grid_res: u32,
-    grid_size: F,
-    statue_center: GpuVec3<F>,
-    bounding_sphere_radius_offset: F,
+    // 🟢 SDF-OBJEKT-TENSOR: Grid-Slots tragen ebenfalls zur Okklusion bei.
+    objects: &Tensor<F>,
+    bound_offset: F,
     ao_iterations: u32,
 ) -> F {
     let mut occ = F::new(0.0);
@@ -56,11 +52,10 @@ pub fn calculate_ao<F: Float>(
         );
         let mut dd = sdf_res.d;
         
-        // 🟢 PLAN STEP 7: Statue trägt zur Okklusion bei (kein Sphere-Bound).
-        // 💡 KORREKTUR: `scene` anstelle des alten `sdf_grid` Slices weiterreichen
+        // 🟢 SDF-OBJEKT-TENSOR: Grid-Slots tragen zur Okklusion bei
+        // (kein Sphere-Bound).
         let plan_res = scene_map_with_material::<F>(
-            ao_pos, pillar_spacing, pillar_height, scene, grid_res, grid_size, false, 
-            statue_center.clone(), bounding_sphere_radius_offset,
+            ao_pos, objects, bound_offset, false,
         );
         if plan_res.d < dd {
             dd = plan_res.d;

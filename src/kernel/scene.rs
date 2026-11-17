@@ -8,9 +8,6 @@ use cubecl::prelude::*;
 use super::objects::{evaluate_dynamic_crystal, evaluate_dynamic_gyroid, evaluate_dynamic_torus};
 use super::types::{ArchParams, FoldParams, SdfResult, Vec3};
 
-// In src/kernel/scene.rs oben bei den Imports hinzufügen:
-use crate::gpu::{SLOTS_COUNT, MATERIALS_COUNT};
-
 #[cube]
 pub fn scene_sdf<F: Float>(
     p: Vec3<F>,
@@ -45,8 +42,8 @@ pub fn scene_sdf<F: Float>(
     // 💡 Die fixen Offsets deines Mega-Buffers als GPU-Usize-Konstanten
        // 💡 KORREKTUR: Nutze cast_from für Host-Konstanten innerhalb des #[cube]-Makros
     let slots_start = usize::new(0);
-    let materials_start = usize::cast_from(SLOTS_COUNT);                   // 800
-    let rotations_start = usize::cast_from(SLOTS_COUNT + MATERIALS_COUNT); // 1200
+    let materials_start = usize::cast_from(crate::gpu::SLOTS_COUNT);                   // 800
+    let rotations_start = usize::cast_from(crate::gpu::SLOTS_COUNT + crate::gpu::MATERIALS_COUNT); // 1200
 
 
     let active_slots = usize::cast_from(active_slots);

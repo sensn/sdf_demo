@@ -9,8 +9,8 @@ use super::ao::calculate_ao;
 use super::pbr::cook_torrance_light;
 use super::scene::{scene_sdf, scene_sdf_normal};
 use super::shadows::calculate_soft_shadow;
-use super::statue_grid::{calculate_normal, scene_map_with_material};
-use super::types::{ArchParams, EnvSettings, FoldParams, GpuVec3, RenderSettings, Vec3};
+use super::statue_grid::{calculate_normal, scene_map_with_material, sdf_object_pbr};
+use super::types::{ArchParams, EnvSettings, FoldParams, RenderSettings, Vec3};
 #[cube]
 pub fn trace_reflection<F: Float>(
     ro: Vec3<F>,
@@ -18,16 +18,15 @@ pub fn trace_reflection<F: Float>(
     time: F,
     blend_factor: F,
     active_slots: u32,
-    scene: &Tensor<F>, // 💡 KORREKTUR: Jetzt die direkte Tensor-Referenz statt der Slices
+    scene: &Tensor<F>, // Mega-Scene-Tensor (Slots/Materials/Rotations)
     arch: ArchParams<F>,
     fold: FoldParams<F>,
-    grid_res: u32,
-    grid_size: F,
+    // 🟢 SDF-OBJEKT-TENSOR
+    objects: &Tensor<F>,
+    bound_offset: F,
     bg_color: Vec3<F>,
     max_dist: F,
     reflection_max_steps: u32,
-    statue_center: GpuVec3<F>,
-    bounding_sphere_radius_offset: F,
     env: EnvSettings<F>,
     render: RenderSettings<F>,
 ) -> Vec3<F> {
@@ -70,24 +69,30 @@ pub fn trace_reflection<F: Float>(
         let mut emiss = sdf_res.emissive;
         let mut spec = sdf_res.specular;
         
-        // … plus Statue (ohne Sphere-Bound — sonst Phantom-Reflexionen).
-        // 💡 KORREKTUR: `scene` anstelle von `sdf_grid` weiterreichen
+        // … plus Grid-Slots (ohne Sphere-Bound — sonst Phantom-Reflexionen).
         let plan_res = scene_map_with_material::<F>(
-            p.clone(), F::new(0.0), F::new(0.0), scene, grid_res, grid_size, false, 
-            statue_center.clone(), bounding_sphere_radius_offset,
+            p.clone(), objects, bound_offset, false,
         );
-        
+
         if plan_res.d < d {
             d = plan_res.d;
-            // Statue: gold-bronze (PBR wie im Primär-Pfad).
-            let is_statue = plan_res.mat_id > F::new(1.5);
-            r = select(is_statue, F::new(0.85), F::new(0.55));
-            g = select(is_statue, F::new(0.7), F::new(0.52));
-            b = select(is_statue, F::new(0.3), F::new(0.5));
-            rough = select(is_statue, F::new(0.35), render.pillar_roughness);
-            metal = select(is_statue, render.statue_metallic, F::new(0.0));
-            emiss = F::new(0.0);
-            spec = F::new(0.5);
+            // Grid-Slot-Material aus dem Header (albedo + PBR, mat_id = 2+slot).
+            let is_grid = plan_res.mat_id > F::new(1.5);
+            if is_grid {
+                let pbr = sdf_object_pbr::<F>(objects, plan_res.mat_id);
+                r = pbr.r;
+                g = pbr.g;
+                b = pbr.b;
+                rough = pbr.roughness;
+                metal = pbr.metallic;
+                emiss = pbr.emissive;
+                spec = pbr.specular;
+            } else {
+                rough = render.pillar_roughness;
+                metal = F::new(0.0);
+                emiss = F::new(0.0);
+                spec = F::new(0.5);
+            }
         }
         
         // 🟢 FIX BUG 2: Glow-Akkumulation entlang des Reflektionsstrahls —
@@ -129,25 +134,21 @@ pub fn trace_reflection<F: Float>(
         let mut n_z = F::new(0.0);
         
         // Normale über die Map, die den Treffer geliefert hat.
-        // 💡 KORREKTUR: `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
+        // 💡 `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
         let sdf_n = scene_sdf_normal::<F>(
             p.clone(), time, blend_factor, active_slots, scene, arch.clone(), fold.clone()
         );
-        // 💡 KORREKTUR: `scene` anstelle des Slices weiterreichen + Turbofisch ergänzt
         let plan_n = calculate_normal::<F>(
-            p.clone(), F::new(0.0), F::new(0.0), scene, grid_res, grid_size, 
-            statue_center.clone(), bounding_sphere_radius_offset
+            p.clone(), objects, bound_offset,
         );
         
         // Wähle per Distanz-Vergleich (keine if-else-Expr für Structs).
-        // 💡 KORREKTUR: `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
+        // 💡 `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
         let sdf_d = scene_sdf::<F>(
             p.clone(), time, blend_factor, active_slots, scene, arch.clone(), fold.clone()
         ).d;
-        // 💡 KORREKTUR: `scene` anstelle des Slices weiterreichen + Turbofisch ergänzt
         let plan_d = scene_map_with_material::<F>(
-            p.clone(), F::new(0.0), F::new(0.0), scene, grid_res, grid_size, false, 
-            statue_center.clone(), bounding_sphere_radius_offset,
+            p.clone(), objects, bound_offset, false,
         ).d;
         
         let use_plan = plan_d < sdf_d;
@@ -181,8 +182,7 @@ pub fn trace_reflection<F: Float>(
             // 💡 KORREKTUR: `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
             let shadow_factor = calculate_soft_shadow::<F>(
                 offset_p, key_dir.clone(), time, blend_factor, active_slots, scene,
-                arch.clone(), fold.clone(), F::new(0.0), F::new(0.0), grid_res, grid_size,
-                statue_center.clone(), bounding_sphere_radius_offset, env.shadow_softness_k,
+                arch.clone(), fold.clone(), objects, bound_offset, env.shadow_softness_k,
             );
             key_visibility = shadow_factor;
         }
@@ -192,8 +192,7 @@ pub fn trace_reflection<F: Float>(
             // 💡 KORREKTUR: `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
             ao_factor = calculate_ao::<F>(
                 p.clone(), normal.clone(), time, blend_factor, active_slots, scene,
-                arch.clone(), fold.clone(), F::new(0.0), F::new(0.0), grid_res, grid_size,
-                statue_center.clone(), bounding_sphere_radius_offset, env.ao_iterations
+                arch.clone(), fold.clone(), objects, bound_offset, env.ao_iterations
             );
         }
 
