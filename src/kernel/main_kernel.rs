@@ -18,13 +18,14 @@ use super::statue_grid::{calculate_normal, scene_map_with_material, sdf_object_p
 use super::types::{ArchParams, CameraSettings, EnvSettings, FoldParams, RenderSettings, Vec3};
 //
 // ALTE IMPORTS ENTFERNEN UND DURCH DIESE ERSETZEN:
-use cubek::tile::{
+//use cubek::tile::{
+use cubecl::tile::{
     Axis, Space,          // Kam aus space
     Partitioning,         // Kam aus partition
-    Launcher, TileArg,  // Kam aus launch
+    Launcher,   // Kam aus launch
     Tile, Scratch,        // Direkt re-exportiert aus dem Tile-Modul
 };
-
+//use cubecl::tile::launch::TileArg;
 //
 // =========================================================================
 // BLUEPRINT & HOST-SIDE CONFIGURATION
