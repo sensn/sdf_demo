@@ -12,11 +12,13 @@
 //! - `ao`          : Ambient Occlusion (calculate_ao)
 //! - `pbr`         : Cook-Torrance-PBR (fresnel, GGX, Smith, ACES, cook_torrance_light)
 //! - `main_kernel` : raymarch_sdf_kernel (Haupt-Render-Pfad)
+//! - `dof`         : 🟢 Depth of Field Pre-Pass (CoC + Bokeh-Disk-Kernel)
 //!
 //! Alle öffentlichen Symbole werden hier re-exportiert, damit externe Aufrufer
 //! (gpu.rs, app_state.rs) unverändert bleiben.
 
 pub mod ao;
+pub mod dof;
 pub mod fog;
 pub mod main_kernel;
 pub mod objects;
@@ -42,3 +44,4 @@ pub use shadows::calculate_soft_shadow;
 pub use ao::calculate_ao;
 pub use pbr::{aces_tonemap, cook_torrance_light, d_ggx, fresnel_schlick, g_smith};
 pub use main_kernel::raymarch_sdf_kernel;
+pub use dof::{compute_coc_and_mask_kernel, generate_disk_kernel};

@@ -6,9 +6,10 @@ edition = "2021"
 [dependencies]
 wgpui = { version = "0.3.6" }
 wgpui-kit = "0.6.1"
-wgpu = { version = "30.0", default-features = false, features = ["vulkan", "wgsl"] }
-cubecl = { version = "0.12.0-pre.2", features = ["wgpu"] }
-cubecl-wgpu = "0.12.0-pre.2"
+wgpu = { version = "30.0", default-features = false, features = ["vulkan", "wgsl","spirv"] }
+cubecl = { version = "0.12.0-pre.2", features = ["wgpu-spirv"] }
+#cubecl-wgpu = "0.12.0-pre.2"
+cubecl-wgpu = { version = "0.12.0-pre.2", features = ["spirv"] }
 cubecl-runtime = "0.12.0-pre.2"
 cubecl-zspace = "0.12.0-pre.2"
 bytemuck = { version = "1.16", features = ["derive"] }
@@ -27,4 +28,13 @@ rfd = "0.16"
 #cubek = { version = "0.3.0", features = ["tile"] }
 #cubek = { git = "https://github.com/tracel-ai/cubek", features = ["tile"] }
 cubek = { version = "0.4.0-pre.2", features = ["matmul-tiled"] }
+
+
+# DoF: hardware-beschleunigte Faltung (im2col + Tensor Cores) via cubek-convolution
+cubek-convolution = "0.4.0-pre.2"
+cubek-std = "0.4.0-pre.2"
+cubek-matmul = "0.4.0-pre.2"
+
+[patch.crates-io]
+wgpui = { path = "vendor/wgpui" }
 

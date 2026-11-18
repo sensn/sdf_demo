@@ -11,15 +11,19 @@
 use crate::app_state::ApplicationState;
 use bytemuck::{Pod, Zeroable};
 //use cubecl::client::ComputeClient; // old cubecl syntax
-use cubecl::client::Client; // 🟢 KORREKTUR: client:: hinzufügen cubecl 0.11.0 
-use cubecl::frontend::TensorArg;
+use cubecl::client::Client; // 🟢 KORREKTUR: client:: hinzufügen cubecl 0.11.0
+use cubecl::frontend::{TensorArg, TensorBinding};
 //use cubecl::Runtime;
 use cubecl_runtime::runtime::Runtime; // RICHTIG
 use cubecl_runtime::server::Handle;
-use cubecl_wgpu::{init_device, RuntimeOptions, WgpuRuntime, WgpuSetup};
+use cubecl_wgpu::{init_device, RuntimeOptions, WgpuSetup};
 use cubecl_zspace::{Shape, Strides};
 use wgpui_kit::WgpuSurfaceHandle;
-use cubecl::prelude::flex32; 
+// 🟢 DoF: `elem_type_native()`/`ElemType` kommen aus dem cubecl-Prelude,
+// das auch `f32: LaunchArg` implementiert.
+use cubecl::prelude::*;
+use cubek_std::InputBinding;
+
 /// 🟢 ZENTRALE STEUERUNG FÜR DIE GPU-PRÄZISION
 /// Hier kannst du den Typ global auf `f32`, `f64` oder (falls vom Backend unterstützt) `f16` ändern.
 pub type GpuFloat = f32;  // Centralized precision switch
@@ -54,12 +58,15 @@ pub const SDF_OBJECTS_BYTES: usize = SDF_OBJECTS_FLOATS * 4; // ~4.2 MB
 // =========================================================================
 
 /// Auflösungs-Uniform für den Screen-Shader (fs_main).
+/// `layout_mode`: 0 = RGBA interleaved (Raymarch), 1 = CHW planar (DoF-Output).
+/// ⚠︎ Muss exakt zur `Resolution`-Struct in `shader.wgsl` passen (std140).
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct ResolutionUniform {
     pub width: u32,
     pub height: u32,
-    pub _padding: [u32; 2],
+    pub layout_mode: u32,
+    pub _padding: u32,
 }
 
 /// Fehler bei der GPU-Initialisierung (Adapter/Device/Shader).
@@ -97,7 +104,7 @@ pub struct GpuPipeline {
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub resolution_buffer: wgpu::Buffer,
     pub resolution: ResolutionUniform,
-    /// Raymarch-Output (RGB f32): w*h*3*4 Bytes. Wird bei Resize ersetzt.
+    /// Raymarch-Output (RGBA f32): w*h*4*4 Bytes. Wird bei Resize ersetzt.
     pub output_handle: Handle,
     // 🟢 OPTIMIZATION 1: Drei separate structured buffers statt eines Mega-Buffers
     pub slots_handle: Handle,
@@ -105,6 +112,16 @@ pub struct GpuPipeline {
     pub rotations_handle: Handle,
     // 🟢 SDF-OBJEKT-TENSOR: Separater Storage-Buffer für die N Grid-Slots.
     pub sdf_objects_handle: Handle,
+
+    // 🟢 DoF (cubek-convolution) — Post-Processing-Pipeline
+    /// CoC-Zwischen-Tensor CHW f32 [3, H, W] — Input der Faltung.
+    pub dof_coc_handle: Handle,
+    /// DoF-Ausgabe CHW f32 [3, H, W] — Input des Blit-Shaders, wenn DoF aktiv.
+    pub dof_out_handle: Handle,
+    /// Bokeh-Disk-Kernel [1, 1, K, K] f32 — wird bei Größenänderung neu erzeugt.
+    pub dof_kernel_handle: Handle,
+    /// Kernel-Seitenlänge K (ungerade, 3..=15).
+    pub dof_kernel_size: u32,
 
     bind_group: Option<wgpu::BindGroup>,
 }
@@ -155,6 +172,11 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
         let materials_handle = client.empty(MATERIALS_BYTES);
         let rotations_handle = client.empty(ROTATIONS_BYTES);
         let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
+        // 🟢 DoF: CoC-Tensor, Ausgabe-Tensor und Bokeh-Disk-Kernel
+        let dof_coc_handle = client.empty(dof_coc_byte_size(width, height));
+        let dof_out_handle = client.empty(dof_out_byte_size(width, height));
+        let dof_kernel_size = DOF_KERNEL_SIZE_DEFAULT;
+        let dof_kernel_handle = client.empty(dof_kernel_byte_size(dof_kernel_size));
         // --- wgpu-Blit: Raymarch-Buffer → Back-Buffer ---
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Screen Shader"),
@@ -163,7 +185,8 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
         let resolution = ResolutionUniform {
             width,
             height,
-            _padding: [0; 2],
+            layout_mode: 0,
+            _padding: 0,
         };
         use wgpu::util::DeviceExt;
         let resolution_buffer =
@@ -252,9 +275,14 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
             materials_handle,
             rotations_handle,
             sdf_objects_handle, // 🟢 SDF-OBJEKT-TENSOR
+            dof_coc_handle,
+            dof_out_handle,
+            dof_kernel_handle,
+            dof_kernel_size,
             bind_group: None,
         };
         pipeline.rebuild_bind_group();
+        pipeline.generate_dof_kernel();
         Ok(pipeline)
     }
 
@@ -295,6 +323,10 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
         let materials_handle = client.empty(MATERIALS_BYTES);
         let rotations_handle = client.empty(ROTATIONS_BYTES);
         let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
+        let dof_coc_handle = client.empty(dof_coc_byte_size(width, height));
+        let dof_out_handle = client.empty(dof_out_byte_size(width, height));
+        let dof_kernel_size = DOF_KERNEL_SIZE_DEFAULT;
+        let dof_kernel_handle = client.empty(dof_kernel_byte_size(dof_kernel_size));
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Screen Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -302,7 +334,8 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
         let resolution = ResolutionUniform {
             width,
             height,
-            _padding: [0; 2],
+            layout_mode: 0,
+            _padding: 0,
         };
         use wgpu::util::DeviceExt;
         let resolution_buffer =
@@ -390,44 +423,72 @@ let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cube
             materials_handle,
             rotations_handle,
             sdf_objects_handle,
+            dof_coc_handle,
+            dof_out_handle,
+            dof_kernel_handle,
+            dof_kernel_size,
             bind_group: None,
         };
         pipeline.rebuild_bind_group();
+        pipeline.generate_dof_kernel();
         Ok(pipeline)
     }
 
-    /// Baut die BindGroup neu (nötig, wenn `output_handle` ersetzt wurde).
+    /// 🟢 Baut die BindGroup neu — für einen **beliebigen** CubeCL-Quell-Handle.
+    ///
+    /// `source` ist der Handle, dessen `WgpuResource` der Fragment-Shader als
+    /// `cubecl_output` liest. 🟢 DoF: Bei aktivem DoF zeigt der Blit auf
+    /// `dof_out_handle` (CHW), sonst auf `output_handle` (RGBA).
+    ///
+    /// ⚠︎ Wichtig (CubeCL-Sub-Allokation): CubeCL teilt Speicher aus einem
+    /// gemeinsamen Pool zu. Darum **immer** `wgpu_resource.offset` (und
+    /// explizit die `size`) an das `wgpu::BufferBinding` weiterreichen —
+    /// sonst liest der Shader am falschen Offset im Pool.
+    fn rebuild_bind_group_for(&mut self, source: Handle) {
+        let managed_resource = self
+            .client
+            .get_resource::<cubecl_wgpu::WgpuServer<cubecl_wgpu::AutoCompiler>>(source)
+            .unwrap();
+        let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
+
+        let binding_size = std::num::NonZeroU64::new(wgpu_resource.size);
+
+        self.bind_group = Some(
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Screen Bind Group"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &wgpu_resource.buffer,
+                            offset: wgpu_resource.offset,
+                            size: binding_size,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &self.resolution_buffer,
+                            offset: 0,
+                            size: std::num::NonZeroU64::new(
+                                std::mem::size_of::<ResolutionUniform>() as u64,
+                            ),
+                        }),
+                    },
+                ],
+            }),
+        );
+    }
+
+    /// BindGroup auf den Raymarch-Output (RGBA) — Default-Zustand.
     fn rebuild_bind_group(&mut self) {
-        // Ergänzen Sie die Turbofish-Syntax mit dem WgpuServer-Typen:
-let managed_resource = self.client
-    .get_resource::<cubecl_wgpu::WgpuServer<cubecl_wgpu::AutoCompiler>>(self.output_handle.clone())
-    .unwrap();
+        self.rebuild_bind_group_for(self.output_handle.clone());
+    }
 
-let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
-//let src_wgpu_buffer = &wgpu_resource.buffer;
-
-        self.bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Screen Bind Group"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &wgpu_resource.buffer,
-                        offset: wgpu_resource.offset,
-                        size: None,
-                    }),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &self.resolution_buffer,
-                        offset: 0,
-                        size: None,
-                    }),
-                },
-            ],
-        }));
+    /// 🟢 DoF: BindGroup auf die Faltungs-Ausgabe (CHW planar) umschalten.
+    fn rebuild_bind_group_dof(&mut self) {
+        self.rebuild_bind_group_for(self.dof_out_handle.clone());
     }
 
     /// Re-Allokiert den Output-Buffer bei Größenänderung und schreibt die
@@ -435,12 +496,17 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
     pub fn resize(&mut self, w: u32, h: u32) {
         self.resolution.width = w;
         self.resolution.height = h;
+        // DoF-Ausgabe wechselt das Blit-Layout wieder auf RGBA
+        self.resolution.layout_mode = 0;
         self.queue.write_buffer(
             &self.resolution_buffer,
             0,
             bytemuck::cast_slice(&[self.resolution]),
         );
         self.output_handle = self.client.empty(output_byte_size(w, h));
+        // 🟢 DoF: CoC- und Ausgabe-Tensoren folgen der neuen Größe.
+        self.dof_coc_handle = self.client.empty(dof_coc_byte_size(w, h));
+        self.dof_out_handle = self.client.empty(dof_out_byte_size(w, h));
         self.rebuild_bind_group();
     }
 
@@ -470,6 +536,255 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
         write(&self.sdf_objects_handle, bytemuck::cast_slice(&packed_objects));
     }
 
+    // =========================================================================
+    // 🟢 DoF: DEPTH-OF-FIELD POST-PASS (cubek-convolution)
+    // =========================================================================
+
+    /// 🟢 DoF: Erzeugt den normalisierten Bokeh-Disk-Kernel `[K×K]` in EINEM
+    /// GPU-Pass (Option A — kein Readback).
+    ///
+    /// Der Kernel macht Generation und Normalisierung selbst: `k ≤ 15` →
+    /// ≤ 225 Elemente, das gesamte Grid läuft in einem Workgroup.
+    ///
+    /// Früher stand hier ein `map_async(MAP_READ)`-Readback — das crashte,
+    /// weil CubeCL-Storage-Buffer nur `COPY_SRC|COPY_DST|STORAGE|INDIRECT`
+    /// tragen und nie `MAP_READ`. Jetzt bleibt alles auf der GPU.
+    pub fn generate_dof_kernel(&mut self) {
+        let k = self.dof_kernel_size;
+
+        crate::kernel::generate_disk_kernel::launch::<GpuFloat>(
+            &self.client,
+            cubecl::CubeCount::Static(1, 1, 1),
+            cubecl::CubeDim::new_3d(k, k, 1),
+            unsafe {
+                TensorArg::from_raw_parts(
+                    self.dof_kernel_handle.clone(),
+                    (&[1usize]).into(),
+                    (&[(k as usize) * (k as usize)]).into(),
+                )
+            },
+            k,
+        );
+    }
+
+    /// Setzt die Kernel-Seitenlänge des Bokeh-Disks und regeneriert ihn.
+    /// Nur bei ungeradem K in 3..=DOF_KERNEL_SIZE_MAX aufrufen.
+    pub fn set_dof_kernel_size(&mut self, k: u32) {
+        let k = k.clamp(3, DOF_KERNEL_SIZE_MAX);
+        if k == self.dof_kernel_size {
+            return;
+        }
+        self.dof_kernel_size = k;
+        self.dof_kernel_handle = self.client.empty(dof_kernel_byte_size(k));
+        self.generate_dof_kernel();
+    }
+
+    /// 🟢 DoF: Kompletter Depth-of-Field-Pass.
+    ///
+    /// 1. `compute_coc_and_mask_kernel` schreibt das CoC-gewichtete RGB ins
+    ///    CHW-Layout (`[3, H, W]`) — der Erwartung von cubek-convolution.
+    /// 2. `cubek_convolution::launch_ref` faltet den Bokeh-Disk per
+    ///    **im2col + Tensor Cores**.
+    ///
+    /// Danach liegt das Ergebnis planar in `dof_out_handle`; der Blit-Shader
+    /// liest es mit `layout_mode = 1`.
+    pub fn apply_depth_of_field(
+        &mut self,
+        dw: u32,
+        dh: u32,
+        focal_distance: GpuFloat,
+        aperture: GpuFloat,
+    ) {
+        // --- Pass 1: CoC + CHW-Umsortierung ---
+        let total_pixels = (dw * dh) as usize;
+        let cubes_x = dw.div_ceil(16);
+        let cubes_y = dh.div_ceil(16);
+
+        let rgba_arg = unsafe {
+            TensorArg::from_raw_parts(
+                self.output_handle.clone(),
+                (&[1usize]).into(),
+                (&[total_pixels * OUTPUT_CHANNELS]).into(),
+            )
+        };
+        let coc_arg = unsafe {
+            TensorArg::from_raw_parts(
+                self.dof_coc_handle.clone(),
+                (&[1usize]).into(),
+                (&[total_pixels * 3]).into(),
+            )
+        };
+
+        crate::kernel::compute_coc_and_mask_kernel::launch::<GpuFloat>(
+            &self.client,
+            cubecl::CubeCount::Static(cubes_x, cubes_y, 1),
+            cubecl::CubeDim::new_3d(16, 16, 1),
+            rgba_arg,
+            coc_arg,
+            dw,
+            dh,
+            focal_distance,
+            aperture,
+            DOF_SKYBOX_DEPTH as GpuFloat,
+        );
+
+        // --- Pass 2: Hardware-Faltung via cubek-convolution ---
+        // Layout: input [1, 3, H, W], weight [1, 1, K, K], out [1, 3, H, W].
+        let k = self.dof_kernel_size as usize;
+        let pad = (self.dof_kernel_size / 2) as usize;
+
+
+        let args = cubek_convolution::ConvolutionArgs::<2> {
+            stride: [1, 1],
+            padding: [pad, pad],
+            dilation: [1, 1],
+        };
+        // 🟢 DoF: Strategie mit Fallback-Kette.
+        //
+        // Der "Inferred"-Pfad sucht ein CMMA/MMA-Tiling für die Problemform
+        // (m=H, n=W, k=3*K*K). Unsere Form ist dafür oft zu klein bzw. f32-CMMA
+        // ist auf dem Vulkan-Adapter nicht verfügbar → "TileSizeNotFound".
+        //
+        // Fallback: `Strategy::Unit` — register-geteilte F32-Faltung ohne
+        // Tensor-Core-Matmul. Laut cubek-Doku genau für Geräte ohne brauchbaren
+        // beschleunigten Matmul (wgpu/Vulkan zählt dazu).
+        let strategies: Vec<(&str, cubek_convolution::Strategy)> = vec![
+            (
+                "unit:BALANCED",
+                cubek_convolution::Strategy::Unit(cubek_convolution::UnitStrategy::Fixed(
+                    cubek_convolution::UnitTiling::BALANCED,
+                )),
+            ),
+            (
+                "unit:DEEP",
+                cubek_convolution::Strategy::Unit(cubek_convolution::UnitStrategy::Fixed(
+                    cubek_convolution::UnitTiling::DEEP,
+                )),
+            ),
+            (
+                "unit:NARROW",
+                cubek_convolution::Strategy::Unit(cubek_convolution::UnitStrategy::Fixed(
+                    cubek_convolution::UnitTiling::NARROW,
+                )),
+            ),
+            (
+                "cmma:SimpleSyncCyclic",
+                cubek_convolution::Strategy::Inferred {
+                    algorithm: cubek_convolution::ConvAlgorithm::SimpleSyncCyclic,
+                    tile_kind: cubek_convolution::AcceleratedTileKind::Cmma,
+                },
+            ),
+            (
+                "cmma:SimpleSyncTilewise",
+                cubek_convolution::Strategy::Inferred {
+                    algorithm: cubek_convolution::ConvAlgorithm::SimpleSyncTilewise,
+                    tile_kind: cubek_convolution::AcceleratedTileKind::Cmma,
+                },
+            ),
+        ];
+
+        // Dtypes einmalig bestimmen (f32 für alle Operanden).
+        let dtypes = cubek_matmul::definition::MatmulElems::from_single_dtype(f32::elem_type_native());
+
+        // Strategien der Reihe nach probieren; die erste, die läuft, gewinnt.
+        // `inputs` wird pro Versuch konsumiert -> frische Bindings klonen.
+        let mut launched = false;
+        for (label, strat) in strategies.iter() {
+            let attempt_inputs = cubek_convolution::ConvolutionInputs::Forward {
+                input: InputBinding::new(
+                    unsafe {
+                        TensorBinding::from_raw_parts(
+                            self.dof_coc_handle.clone(),
+                            Strides::new(&[
+                                dh as usize * dw as usize * 3,
+                                dw as usize * 3,
+                                3,
+                                1,
+                            ]),
+                            Shape::from(vec![1usize, dh as usize, dw as usize, 3usize]),
+                        )
+                    },
+                    f32::elem_type_native(),
+                ),
+                weight: InputBinding::new(
+                    unsafe {
+                        TensorBinding::from_raw_parts(
+                            self.dof_kernel_handle.clone(),
+                            Strides::new(&[
+                                    k * k * 3,
+                                    k * 3,
+                                    3,
+                                    1,
+                                ]),
+                            Shape::from(vec![3usize, k, k, 3usize]),
+                        )
+                    },
+                    f32::elem_type_native(),
+                ),
+                bias: None,
+                out: unsafe {
+                    TensorBinding::from_raw_parts(
+                        self.dof_out_handle.clone(),
+                        Strides::new(&[
+                            3 * dh as usize * dw as usize,
+                            dh as usize * dw as usize,
+                            dw as usize,
+                            1,
+                        ]),
+                        Shape::from(vec![1usize, dh as usize, dw as usize, 3usize]),
+                    )
+                },
+            };
+
+            match cubek_convolution::launch_ref::<2>(strat, &self.client, attempt_inputs, args.clone(), dtypes.clone()) {
+                Ok(()) => {
+                    println!("[DoF] Faltung via Strategie '{label}' gestartet");
+                    launched = true;
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("[DoF] Strategie '{label}' abgelehnt: {e:?} — nächster Versuch");
+                }
+            }
+        }
+
+        if !launched {
+            eprintln!("[DoF] Keine Faltungs-Strategie funktionierte — Frame ungefiltert");
+            self.set_layout_mode(0);
+            return;
+        }
+
+        // Ergebnis planar in dof_out_handle →
+        self.set_layout_mode(1);
+    }
+
+    /// Setzt den Blit-Layout-Modus direkt (0 = RGBA, 1 = CHW).
+    /// 🟢 DoF: Schaltet den Blit-Layout-Modus um und bindet den passenden
+    /// CubeCL-Quell-Buffer:
+    /// * `mode == 0` → RGBA-interleaved aus `output_handle` (Raymarch direkt)
+    /// * `mode == 1` → CHW-planar aus `dof_out_handle` (Faltungs-Ausgabe)
+    ///
+    /// Der Modus-Wechsel ist idempotent: bei gleichem Modus wird nichts
+    /// geschrieben und keine BindGroup neu gebaut (keine Per-Frame-Kosten).
+    pub fn set_layout_mode(&mut self, mode: u32) {
+        if self.resolution.layout_mode == mode {
+            return;
+        }
+        self.resolution.layout_mode = mode;
+        self.queue.write_buffer(
+            &self.resolution_buffer,
+            0,
+            bytemuck::cast_slice(&[self.resolution]),
+        );
+
+        // Quell-Buffer des Blits passend zum Layout umschalten.
+        if mode == 1 {
+            self.rebuild_bind_group_dof();
+        } else {
+            self.rebuild_bind_group();
+        }
+    }
+
     /// Ein kompletter Frame: Raymarch-Kernel-Launch + Blit auf den
     /// Back-Buffer. `time`/`dt` in Sekunden.
     #[allow(clippy::too_many_arguments)]
@@ -486,11 +801,12 @@ pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: Gp
     let cube_dim = cubecl::CubeDim::new_3d(CUBE_DIM_X, CUBE_DIM_Y, 1);
     
     // --- Kernel-Args ---
+    // 🟢 DoF: Output ist RGBA f32 [W*H*4] — A trägt die Tiefe für den CoC-Pass.
     let output_arg = unsafe {
         TensorArg::from_raw_parts(
             self.output_handle.clone(),
             (&[1usize]).into(),
-            (&[total_pixels]).into(),
+            (&[total_pixels * OUTPUT_CHANNELS]).into(),
         )
     };
     
@@ -589,7 +905,37 @@ pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: Gp
     }
 }
 
-/// RGB f32-Output: 3 Kanäle × 4 Bytes pro Pixel.
+/// RGBA f32-Output: 4 Kanäle × 4 Bytes pro Pixel.
+/// R/G/B = Farbe, A = Tiefe (`hit_dist`) für den DoF-Post-Pass.
+/// 🟢 DoF: Erweitert von RGB (3) auf RGBA (4) — der Alpha-Kanal trägt die
+/// Primärstrahl-Distanz, aus der der CoC-Kernel den Unschärferadius ableitet.
 fn output_byte_size(w: u32, h: u32) -> usize {
-    (w * h) as usize * 3 * 4
+    (w * h) as usize * 4 * 4
 }
+
+/// Anzahl der RGBA-Kanäle pro Pixel.
+pub const OUTPUT_CHANNELS: usize = 4;
+
+/// Größe des CoC-Zwischen-Tensors: CHW f32 ([3, H, W]) — das Layout,
+/// das `cubek-convolution` für den Bild-Operanden erwartet.
+const fn dof_coc_byte_size(width: u32, height: u32) -> usize {
+    (width as usize * height as usize) * 3 * 4
+}
+
+/// Größe des finalen DoF-Ausgabe-Tensors: CHW f32 ([3, H, W]).
+const fn dof_out_byte_size(width: u32, height: u32) -> usize {
+    (width as usize * height as usize) * 3 * 4
+}
+
+/// Größe des Faltungs-Kernels (Bokeh-Disk): `[3, K, K, 3]` f32 — channels-last.
+/// 🟢 3 Output- × 3 Input-Kanäle × K×K Raumtaps (Kernel ist kanalisch identisch).
+const fn dof_kernel_byte_size(kernel_size: u32) -> usize {
+    3 * (kernel_size as usize) * (kernel_size as usize) * 3 * 4
+}
+
+/// Maximale Kernelgröße des Bokeh-Disks (Slider-Bereich 3..=15).
+pub const DOF_KERNEL_SIZE_MAX: u32 = 15;
+/// Default-Kernelgröße des Bokeh-Disks (7×7 — kinoreifes Bokeh).
+pub const DOF_KERNEL_SIZE_DEFAULT: u32 = 7;
+/// Fokusebene bei Skybox-Treffern (kein Geometrie-Hit) — maximale Unschärfe.
+pub const DOF_SKYBOX_DEPTH: f32 = 40.0;

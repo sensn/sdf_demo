@@ -13,7 +13,7 @@ use wgpui_kit::{
 
 use crate::app_state::ApplicationState;
 
-use super::super::widgets::{acc_item, info_row, key_row, section, toggle_row};
+use super::super::widgets::{acc_item, info_row, key_row, section, slider_row, slider_row_fmt, toggle_row};
 use super::super::{GuiState, ITEM_BG};
 
 /// Ctrl-Tab: Kamera-Info, Render-Schalter (AO/Lichter/Schatten), Tasten-Hilfe im Accordion.
@@ -39,7 +39,7 @@ let open = gui.accordion_state.read(cx).ctrl_open.clone(); // 🟢 Nutzt ctrl_op
                     .on_toggle_click(move |open_ix: &[usize], _win, cx| {
                        acc_state.update(cx, |st, cx| {
             // 🟢 FIX: Schreibt jetzt korrekt in ctrl_open statt env_open!
-            st.ctrl_open = (0..3).map(|i| open_ix.contains(&i)).collect();
+            st.ctrl_open = (0..4).map(|i| open_ix.contains(&i)).collect();
             cx.notify();
         });
                     })
@@ -55,8 +55,37 @@ let open = gui.accordion_state.read(cx).ctrl_open.clone(); // 🟢 Nutzt ctrl_op
                         ],
                     ))
                     .item(acc_item(
+                        "Depth of Field (cubek-convolution)",
+                        open[1], // 🟢 DoF-Gruppe = Index 1
+                        vec![
+                            toggle_row(
+                                "dof_switch",
+                                "Enable DoF",
+                                state,
+                                s.dof_enabled == 1,
+                                |s, on| s.dof_enabled = if on { 1 } else { 0 },
+                            ).into_any_element(),
+                            slider_row(
+                                "Focus Distance",
+                                &gui.dof_focal_distance_slider,
+                                s.dof_focal_distance,
+                            ).into_any_element(),
+                            slider_row(
+                                "Aperture",
+                                &gui.dof_aperture_slider,
+                                s.dof_aperture,
+                            ).into_any_element(),
+                            slider_row_fmt(
+                                "Bokeh Kernel",
+                                &gui.dof_kernel_size_slider,
+                                s.dof_kernel_size as f32,
+                                0,
+                            ).into_any_element(),
+                        ],
+                    ))
+                    .item(acc_item(
                         "Rendering",
-                        open[1], // 🟢 FIX: Array-Index hinzugefügt
+                        open[2], // Rendering = Index 2 (nach DoF)
                         vec![
                             toggle_row(
                                 "ao_switch",
@@ -102,7 +131,7 @@ let open = gui.accordion_state.read(cx).ctrl_open.clone(); // 🟢 Nutzt ctrl_op
                     ))
                     .item(acc_item(
                         "Key Bindings",
-                        open[2], // 🟢 FIX: Array-Index hinzugefügt
+                        open[3], // 🟢 FIX: Array-Index hinzugefügt
                         vec![
                             key_row("WASD", "Fly through Scene").into_any_element(),
                             key_row("Q / E", "Camera Up / Down").into_any_element(),

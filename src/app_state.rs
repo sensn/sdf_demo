@@ -136,6 +136,13 @@ pub struct ApplicationState {
     // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration (Obj-Tab)
     pub bounding_sphere_radius_offset: f32, // Proximity-Schranke (default 0.1)
     pub mesh_scale_factor: f32,             // Mesh-Normalisierung (0.1..1.0, default 0.8)
+
+    // 🟢 DoF (Depth of Field) — Post-Processing via cubek-convolution.
+    // Gesteuert vom Ctrl-Tab; `dof_enabled = 0` bedeutet Bypass (Direkt-Render).
+    pub dof_enabled: u32,       // 0/1-Schalter
+    pub dof_focal_distance: f32, // Schärfeentfernung (0.5..40.0, default 8.0)
+    pub dof_aperture: f32,       // Blendenöffnung / Unschärfe-Stärke (0.0..5.0, default 0.6)
+    pub dof_kernel_size: u32,   // Bokeh-Disk-Seitenlänge K (3..15, ungerade, default 7)
 }
 
 impl Default for ApplicationState {
@@ -271,6 +278,12 @@ impl Default for ApplicationState {
             // 🟢 PARAM-GUI: Objekt / Statue-Konfiguration-Defaults
             bounding_sphere_radius_offset: 0.1,
             mesh_scale_factor: 0.8,
+
+            // 🟢 DoF-Defaults: aktiv, Fokus 8.0, moderate Blende, 7×7 Bokeh-Disk
+            dof_enabled: 1,
+            dof_focal_distance: 8.0,
+            dof_aperture: 0.6,
+            dof_kernel_size: 7,
         }
     }
 }
@@ -579,4 +592,18 @@ pub fn sdf_objects_data(&self) -> Vec<GpuFloat> {
         }
     }
 
+    /// 🟢 DoF: Fokus-Distanz und Blendenöffnung als GPU-Skalare
+    /// (direkte Kernel-Parameter für `compute_coc_and_mask_kernel`).
+    pub fn dof_focal(&self) -> GpuFloat {
+        self.dof_focal_distance as GpuFloat
+    }
+
+    pub fn dof_aperture_scalar(&self) -> GpuFloat {
+        self.dof_aperture as GpuFloat
+    }
+
+    /// 🟢 DoF: Ist der Post-Pass aktiv?
+    pub fn dof_is_enabled(&self) -> bool {
+        self.dof_enabled != 0
+    }
 }

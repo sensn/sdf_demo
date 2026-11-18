@@ -488,11 +488,15 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
         let w_idx = usize::cast_from(w_val);
 
         // 2. Berechne den Index direkt in einem Rutsch als usize
-        let pixel_index = (y_idx * w_idx + x_idx) * usize::new(3);
+        // 🟢 DoF: RGBA-Layout (Stride 4) — R/G/B Farbe, A = Tiefe.
+        // Der Alpha-Kanal trägt `hit_dist`, damit der CoC-Faltungs-Kernel
+        // den Unschärferadius pro Pixel ableiten kann (Skybox = 40.0 = max. Unschärfe).
+        let pixel_index = (y_idx * w_idx + x_idx) * usize::new(4);
 
         // 3. Direktes Schreiben ohne Typprobleme
         output[pixel_index] = final_color_x;
         output[pixel_index + usize::new(1)] = final_color_y;
         output[pixel_index + usize::new(2)] = final_color_z;
+        output[pixel_index + usize::new(3)] = hit_dist; // A: Primärstrahl-Distanz
     }
 }

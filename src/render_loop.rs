@@ -101,7 +101,33 @@ if morph_wave > 0.5 {
         // 🟢 GPU-RENDER PHASE (Läuft sicher außerhalb des Mutex-Locks)
         // =========================================================================
         // Wir holen uns für den Lesezugriff des Shaders einen schnellen, frischen Lock
+        // =========================================================================
+        // 🟢 DoF: DEPTH-OF-FIELD POST-PASS (außerhalb des Mutex-Locks)
+        // =========================================================================
+        // Bei aktivem DoF schaltet `apply_depth_of_field` den Layout-Modus
+        // (und damit die Blit-BindGroup) selbst — kein zusätzliches
+        // `set_layout_mode` hier nötig. Bei deaktiviertem DoF nur zurückschalten.
         let s_render = state.lock().unwrap();
+
+        if s_render.dof_enabled != 0 {
+            // Kernelgröße wurde per Slider geändert → Bokeh-Disk neu erzeugen.
+            let requested_k = s_render.dof_kernel_size;
+            if requested_k != pipeline.dof_kernel_size {
+                pipeline.set_dof_kernel_size(requested_k);
+            }
+
+            // CoC-Vorbereitung + cubek-convolution Faltung (im2col + Tensor Cores).
+            // Setzt intern layout_mode 1 und bindet `dof_out_handle`.
+            pipeline.apply_depth_of_field(
+                dw,
+                dh,
+                s_render.dof_focal(),
+                s_render.dof_aperture_scalar(),
+            );
+        } else {
+            pipeline.set_layout_mode(0); // Blit liest RGBA-interleaved
+        }
+
         pipeline.render_frame(&view, dw, dh, &s_render, time);
         drop(s_render);
         

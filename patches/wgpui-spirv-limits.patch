@@ -1,0 +1,13 @@
+--- /home/loko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpui-0.3.6/src/platform/render_context.rs	2006-07-24 03:21:28.000000000 +0200
++++ vendor/wgpui/src/platform/render_context.rs	2026-11-18 23:43:51.859797919 +0100
+@@ -37,8 +37,8 @@
+         let (device, queue) =
+             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                 label: None,
+-                required_features: wgpu::Features::empty(),
+-                required_limits: wgpu::Limits::default(),
++                 required_features: adapter.features(),
++                required_limits: adapter.limits(),
+                 ..Default::default()
+             }))?;
+ 

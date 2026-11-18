@@ -174,6 +174,10 @@ pub struct GuiState {
     // 🟢 PARAM-GUI: Objekt / Back-Konfiguration (global, SDF-Tab)
     pub mesh_scale_factor_slider: Entity<SliderState>,
     pub bounding_sphere_radius_offset_slider: Entity<SliderState>,
+    // 🟢 DoF: Fokus-Distanz / Blendenöffnung / Bokeh-Größe (Ctrl-Tab)
+    pub dof_focal_distance_slider: Entity<SliderState>,
+    pub dof_aperture_slider: Entity<SliderState>,
+    pub dof_kernel_size_slider: Entity<SliderState>,
 
     /// UI-Zustand
     pub tab_state: Entity<TabState>,
@@ -335,6 +339,14 @@ impl GuiState {
             cx.new(|_| SliderState::new().min(0.1).max(1.0).step(0.01).default_value(0.8));
         let bounding_sphere_radius_offset_slider =
             cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(0.1));
+
+        // --- 🟢 DoF: Fokus 0.5..40.0, Blende 0.0..5.0, Kernel 3..15 (nur ungerade) ---
+        let dof_focal_distance_slider =
+            cx.new(|_| SliderState::new().min(0.5).max(40.0).step(0.5).default_value(8.0));
+        let dof_aperture_slider =
+            cx.new(|_| SliderState::new().min(0.0).max(5.0).step(0.05).default_value(0.6));
+        let dof_kernel_size_slider =
+            cx.new(|_| SliderState::new().min(3.0).max(15.0).step(2.0).default_value(7.0));
 
         // --- Subscriptions (Slider -> ApplicationState)
         subscribe_slider(cx, &light_intensity_slider, state, |s, v| s.light_intensity = v);
@@ -531,6 +543,20 @@ impl GuiState {
             s.bounding_sphere_radius_offset = v;
         });
 
+        // --- 🟢 DoF-Subscriptions ---
+        subscribe_slider(cx, &dof_focal_distance_slider, state, |s, v| {
+            s.dof_focal_distance = v;
+        });
+        subscribe_slider(cx, &dof_aperture_slider, state, |s, v| {
+            s.dof_aperture = v;
+        });
+        // Schrittweite 2 → K bleibt bei 3, 5, 7, 9, 11, 13, 15 (ungerade).
+        subscribe_slider(cx, &dof_kernel_size_slider, state, |s, v| {
+            let k = (v.round() as u32).clamp(3, 15);
+            let k_odd = if k % 2 == 0 { k - 1 } else { k };
+            s.dof_kernel_size = k_odd.max(3);
+        });
+
         // --- UI-Zustand: Tab 0 (Env) aktiv, erste Accordion-Gruppe offen
         let tab_state = cx.new(|_| TabState {
             active: GuiTab::Environment,
@@ -542,7 +568,7 @@ impl GuiState {
     mat_open: vec![true, true, true],         // Startet offen/teilweise offen
     obj_open: vec![true, true, true, true, true],
     sdf_open: vec![true, false, false, true, false], // SDF-Tab: Position + Material offen
-    ctrl_open: vec![true, true, true],        // 🟢 HIER: Alle 3 Gruppen standardmäßig komplett offen!
+    ctrl_open: vec![true, true, true, true], // 🟢 DoF-Gruppe ergänzt (Kamera, DoF, Rendering, Keys)        // 🟢 HIER: Alle 3 Gruppen standardmäßig komplett offen!
 });
 
         Self {
@@ -615,6 +641,9 @@ impl GuiState {
             sdf_specular_slider,
             mesh_scale_factor_slider,
             bounding_sphere_radius_offset_slider,
+            dof_focal_distance_slider,
+            dof_aperture_slider,
+            dof_kernel_size_slider,
             tab_state,
             accordion_state,
         }
@@ -716,5 +745,9 @@ impl GuiState {
         // 🟢 PARAM-GUI: Globale Back-Konfiguration (SDF-Tab)
         sync_one(&self.mesh_scale_factor_slider, state.mesh_scale_factor, window, cx);
         sync_one(&self.bounding_sphere_radius_offset_slider, state.bounding_sphere_radius_offset, window, cx);
+        // 🟢 DoF-Sync
+        sync_one(&self.dof_focal_distance_slider, state.dof_focal_distance, window, cx);
+        sync_one(&self.dof_aperture_slider, state.dof_aperture, window, cx);
+        sync_one(&self.dof_kernel_size_slider, state.dof_kernel_size as f32, window, cx);
     }
 }
