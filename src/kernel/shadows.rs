@@ -16,7 +16,9 @@ pub fn calculate_soft_shadow<F: Float>(
     time: F,
     blend_factor: F,
     active_slots: u32,
-    scene: &Tensor<F>, // Mega-Scene-Tensor (Slots/Materials/Rotations)
+    slots: &Tensor<F>,           // 🟢 OPTIMIZATION 1: Flat f32 buffer for SlotData (100 * 8 = 800 f32)
+    materials: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for MaterialData (100 * 4 = 400 f32)
+    rotations: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for RotationData (100 * 3 = 300 f32)
     arch: ArchParams<F>,
     fold: FoldParams<F>,
     // 🟢 SDF-OBJEKT-TENSOR: Grid-Slots werfen ebenfalls Schatten.
@@ -39,9 +41,10 @@ pub fn calculate_soft_shadow<F: Float>(
         let current_rd = rd.clone();
         let p = current_ro.add(current_rd.scale(t));
         
-        // 💡 KORREKTUR: `scene` anstelle der alten Slices weiterreichen + Turbofisch ergänzt
+        // 💡 KORREKTUR: `slots/materials/rotations` statt der alten Slices weiterreichen
         let sdf_res = scene_sdf::<F>(
-            p.clone(), time, blend_factor, active_slots, scene,
+            p.clone(), time, blend_factor, active_slots,
+            slots, materials, rotations,
             arch.clone(), fold.clone()
         );
         let mut h = sdf_res.d;

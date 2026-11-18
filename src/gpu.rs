@@ -99,8 +99,10 @@ pub struct GpuPipeline {
     pub resolution: ResolutionUniform,
     /// Raymarch-Output (RGB f32): w*h*3*4 Bytes. Wird bei Resize ersetzt.
     pub output_handle: Handle,
-    // 📦 REFAKTORIERT: Ein einziger Mega-Buffer statt 3 Einzelslots!
-    pub scene_handle: Handle, 
+    // 🟢 OPTIMIZATION 1: Drei separate structured buffers statt eines Mega-Buffers
+    pub slots_handle: Handle,
+    pub materials_handle: Handle,
+    pub rotations_handle: Handle,
     // 🟢 SDF-OBJEKT-TENSOR: Separater Storage-Buffer für die N Grid-Slots.
     pub sdf_objects_handle: Handle,
 
@@ -146,12 +148,13 @@ impl GpuPipeline {
 let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cubecl_device_id);
 
         // --- Kernel-Register-Buffer ---
-      // --- Kernel-Register-Buffer ---
-let output_handle = client.empty(output_byte_size(width, height));
+        let output_handle = client.empty(output_byte_size(width, height));
 
-// 📦 2. Nur noch EIN Handle allokieren
-let scene_handle = client.empty(TOTAL_SCENE_BYTES);
-let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
+        // 🟢 OPTIMIZATION 1: Drei separate structured buffers + Objekt-Tensor
+        let slots_handle = client.empty(SLOTS_BYTES);
+        let materials_handle = client.empty(MATERIALS_BYTES);
+        let rotations_handle = client.empty(ROTATIONS_BYTES);
+        let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
         // --- wgpu-Blit: Raymarch-Buffer → Back-Buffer ---
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Screen Shader"),
@@ -245,7 +248,9 @@ let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
             resolution_buffer,
             resolution,
             output_handle,
-            scene_handle, // 🟢 Jetzt kompakt verpackt
+            slots_handle,
+            materials_handle,
+            rotations_handle,
             sdf_objects_handle, // 🟢 SDF-OBJEKT-TENSOR
             bind_group: None,
         };
@@ -286,7 +291,9 @@ let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
         let cubecl_device_id = init_device(wgpu_setup, RuntimeOptions::default());
         let client = cubecl_wgpu::WgpuRuntime::<cubecl_wgpu::AutoCompiler>::client(&cubecl_device_id);
         let output_handle = client.empty(output_byte_size(width, height));
-        let scene_handle = client.empty(TOTAL_SCENE_BYTES);
+        let slots_handle = client.empty(SLOTS_BYTES);
+        let materials_handle = client.empty(MATERIALS_BYTES);
+        let rotations_handle = client.empty(ROTATIONS_BYTES);
         let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Screen Shader"),
@@ -379,7 +386,9 @@ let sdf_objects_handle = client.empty(SDF_OBJECTS_BYTES);
             resolution_buffer,
             resolution,
             output_handle,
-            scene_handle,
+            slots_handle,
+            materials_handle,
+            rotations_handle,
             sdf_objects_handle,
             bind_group: None,
         };
@@ -449,18 +458,17 @@ let wgpu_resource: &cubecl_wgpu::WgpuResource = managed_resource.resource();
         let wgpu_res: &cubecl_wgpu::WgpuResource = resource.resource();
         
         self.queue.write_buffer(&wgpu_res.buffer, wgpu_res.offset, data);
-    };
-        // 🚀 Nur noch echte dynamische Arrays als Storage-Buffer (params4).
-        // meta/env/arch/fold/camera/render reisen als CubeLaunch-Structs im
-        // Info-Uniform — kein write_buffer mehr nötig (params2/params4).
-        // 📦 REFAKTORIERT & OPTIMIERT: 
-    // Register-Tabelle (Slots, Materials, Rotations) reist als Mega-Buffer,
-    // die N SDF-Grid-Slots als eigener Objekt-Tensor.
-    let packed_scene = s.scene_data();
-    write(&self.scene_handle, bytemuck::cast_slice(&packed_scene));
-    let packed_objects = s.sdf_objects_data();
-    write(&self.sdf_objects_handle, bytemuck::cast_slice(&packed_objects));
-}
+        };
+        // 🟢 OPTIMIZATION 1: Drei separate structured buffers + Objekt-Tensor
+        let packed_slots = s.slots_data();
+        write(&self.slots_handle, bytemuck::cast_slice(&packed_slots));
+        let packed_materials = s.materials_data();
+        write(&self.materials_handle, bytemuck::cast_slice(&packed_materials));
+        let packed_rotations = s.rotations_data();
+        write(&self.rotations_handle, bytemuck::cast_slice(&packed_rotations));
+        let packed_objects = s.sdf_objects_data();
+        write(&self.sdf_objects_handle, bytemuck::cast_slice(&packed_objects));
+    }
 
     /// Ein kompletter Frame: Raymarch-Kernel-Launch + Blit auf den
     /// Back-Buffer. `time`/`dt` in Sekunden.
@@ -486,15 +494,32 @@ pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: Gp
         )
     };
     
-    let scene_arg = unsafe {
+    // 🟢 OPTIMIZATION 1: Drei separate structured buffers statt eines Mega-Buffers
+    let slots_arg = unsafe {
         cubecl::prelude::TensorArg::from_raw_parts(
-            self.scene_handle.clone(),
-            (&[TOTAL_SCENE_FLOATS]).into(), 
+            self.slots_handle.clone(),
+            (&[SLOTS_COUNT]).into(), 
             (&[1usize]).into(),                  
         )
     };
     
-    // 🟢 SDF-OBJEKT-TENSOR: Zweiter Storage-Tensor (Header + Grids).
+    let materials_arg = unsafe {
+        cubecl::prelude::TensorArg::from_raw_parts(
+            self.materials_handle.clone(),
+            (&[MATERIALS_COUNT]).into(),
+            (&[1usize]).into(),
+        )
+    };
+    
+    let rotations_arg = unsafe {
+        cubecl::prelude::TensorArg::from_raw_parts(
+            self.rotations_handle.clone(),
+            (&[ROTATIONS_COUNT]).into(),
+            (&[1usize]).into(),
+        )
+    };
+    
+    // 🟢 SDF-OBJEKT-TENSOR: Storage-Tensor mit Headers + Grids.
     let objects_arg = unsafe {
         cubecl::prelude::TensorArg::from_raw_parts(
             self.sdf_objects_handle.clone(),
@@ -509,7 +534,9 @@ pub fn launch_kernel(&mut self, dw: u32, dh: u32, s: &ApplicationState, time: Gp
         cube_count,
         cube_dim,
         output_arg,
-        scene_arg,
+        slots_arg,
+        materials_arg,
+        rotations_arg,
         objects_arg,
         s.camera_launch(),
         s.env_launch(),

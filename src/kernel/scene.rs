@@ -14,7 +14,9 @@ pub fn scene_sdf<F: Float>(
     time: F,
     blend_factor: F,
     active_slots: u32,
-    scene: &Tensor<F>, // 💡 KORREKTUR: Akzeptiert den verpackten Mega-Buffer
+    slots: &Tensor<F>,           // 🟢 OPTIMIZATION 1: Flat f32 buffer for SlotData (100 * 8 = 800 f32)
+    materials: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for MaterialData (100 * 4 = 400 f32)
+    rotations: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for RotationData (100 * 3 = 300 f32)
     arch: ArchParams<F>,
     fold: FoldParams<F>,
 ) -> SdfResult<F> {
@@ -39,44 +41,42 @@ pub fn scene_sdf<F: Float>(
     let mut sum_spec = F::new(0.0);
     let mut sum_w = F::new(0.0);
 
-    // 💡 Die fixen Offsets deines Mega-Buffers als GPU-Usize-Konstanten
-       // 💡 KORREKTUR: Nutze cast_from für Host-Konstanten innerhalb des #[cube]-Makros
-    let slots_start = usize::new(0);
-    let materials_start = usize::cast_from(crate::gpu::SLOTS_COUNT);                   // 800
-    let rotations_start = usize::cast_from(crate::gpu::SLOTS_COUNT + crate::gpu::MATERIALS_COUNT); // 1200
+    // 🟢 OPTIMIZATION 1: Stride-Adressierung in den 3 separaten Buffern.
+    // SlotData stride = 8, MaterialData stride = 4, RotationData stride = 3.
+    let slots_stride = usize::new(8);
+    let materials_stride = usize::new(4);
+    let rotations_stride = usize::new(3);
 
-
-    let active_slots = usize::cast_from(active_slots);
+    let active_slots_us = usize::cast_from(active_slots);
 
     let mut i = usize::new(0);
     loop {
-        if i >= usize::new(100) || i >= active_slots {
+        if i >= usize::new(100) || i >= active_slots_us {
             break;
         }
 
-              let base_idx = i * usize::new(8);
-        // 💡 KORREKTUR: Auslesen aus dem Tensor mit manuellem Offset auf GPU-Usize-Ebene
-        let obj_type = u32::cast_from(scene[slots_start + base_idx]);
+        let slot_base = i * slots_stride;
+        let obj_type = u32::cast_from(slots[slot_base]);
 
         if obj_type > u32::new(0) {
-            let obj_size: F = scene[slots_start + base_idx + usize::new(1)];
-            let offset_x: F = scene[slots_start + base_idx + usize::new(2)];
-            let offset_y: F = scene[slots_start + base_idx + usize::new(3)];
-            let offset_z: F = scene[slots_start + base_idx + usize::new(4)];
-            let obj_r: F = scene[slots_start + base_idx + usize::new(5)];
-            let obj_g: F = scene[slots_start + base_idx + usize::new(6)];
-            let obj_b: F = scene[slots_start + base_idx + usize::new(7)];
+            let obj_size: F = slots[slot_base + usize::new(1)];
+            let offset_x: F = slots[slot_base + usize::new(2)];
+            let offset_y: F = slots[slot_base + usize::new(3)];
+            let offset_z: F = slots[slot_base + usize::new(4)];
+            let obj_r: F = slots[slot_base + usize::new(5)];
+            let obj_g: F = slots[slot_base + usize::new(6)];
+            let obj_b: F = slots[slot_base + usize::new(7)];
 
-            let mat_idx = i * usize::new(4);
-            let obj_rough: F = scene[materials_start + mat_idx];
-            let obj_metal: F = scene[materials_start + mat_idx + usize::new(1)];
-            let obj_emiss: F = scene[materials_start + mat_idx + usize::new(2)];
-            let obj_spec: F = scene[materials_start + mat_idx + usize::new(3)];
+            let mat_base = i * materials_stride;
+            let obj_rough: F = materials[mat_base];
+            let obj_metal: F = materials[mat_base + usize::new(1)];
+            let obj_emiss: F = materials[mat_base + usize::new(2)];
+            let obj_spec: F = materials[mat_base + usize::new(3)];
             
-            let rot_idx = i * usize::new(3);
-            let rot_x: F = scene[rotations_start + rot_idx];
-            let rot_y: F = scene[rotations_start + rot_idx + usize::new(1)];
-            let rot_z: F = scene[rotations_start + rot_idx + usize::new(2)];
+            let rot_base = i * rotations_stride;
+            let rot_x: F = rotations[rot_base];
+            let rot_y: F = rotations[rot_base + usize::new(1)];
+            let rot_z: F = rotations[rot_base + usize::new(2)];
 
 
             // ... (Restlicher Schleifencode bleibt unberührt!)
@@ -295,13 +295,15 @@ pub fn scene_sdf_normal<F: Float>(
     time: F,
     blend_factor: F,
     active_slots: u32,
-    scene: &Tensor<F>, // 💡 KORREKTUR: Auch hier Tensor anstelle der Slices
+    slots: &Tensor<F>,           // 🟢 OPTIMIZATION 1: Flat f32 buffer for SlotData (100 * 8 = 800 f32)
+    materials: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for MaterialData (100 * 4 = 400 f32)
+    rotations: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for RotationData (100 * 3 = 300 f32)
     arch: ArchParams<F>,
     fold: FoldParams<F>,
 ) -> Vec3<F> {
     let eps = F::new(0.002);
     let d_res = scene_sdf::<F>(
-        p.clone(), time, blend_factor, active_slots, scene, arch.clone(), fold.clone()
+        p.clone(), time, blend_factor, active_slots, slots, materials, rotations, arch.clone(), fold.clone()
     );
     let d = d_res.d;
     
@@ -309,9 +311,9 @@ pub fn scene_sdf_normal<F: Float>(
     let p_y = Vec3::<F>::new(p.x, p.y + eps, p.z);
     let p_z = Vec3::<F>::new(p.x, p.y, p.z + eps);
     
-    let nx = scene_sdf::<F>(p_x, time, blend_factor, active_slots, scene, arch.clone(), fold.clone()).d - d;
-    let ny = scene_sdf::<F>(p_y, time, blend_factor, active_slots, scene, arch.clone(), fold.clone()).d - d;
-    let nz = scene_sdf::<F>(p_z, time, blend_factor, active_slots, scene, arch, fold).d - d;
+    let nx = scene_sdf::<F>(p_x, time, blend_factor, active_slots, slots, materials, rotations, arch.clone(), fold.clone()).d - d;
+    let ny = scene_sdf::<F>(p_y, time, blend_factor, active_slots, slots, materials, rotations, arch.clone(), fold.clone()).d - d;
+    let nz = scene_sdf::<F>(p_z, time, blend_factor, active_slots, slots, materials, rotations, arch, fold).d - d;
     
     Vec3::<F>::new(nx, ny, nz).normalize()
 }

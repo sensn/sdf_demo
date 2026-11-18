@@ -110,6 +110,52 @@ pub struct Vec2<F: Float> {
     pub mat_id: F,
 }
 
+/// 🟢 OPTIMIZATION (Hot-Loop): Minimale Sphere-Bound-Distanz über ALLE
+/// Grid-Slots — **ohne** das Grid anzufassen (nur 24f Header pro Slot statt
+/// 64³ Voxel). Gibt einen Wert > 0 zurück, wenn kein Slot näher als seine
+/// Kugel sein kann.
+///
+/// Nutzung im March: `if objects_min_bound_distance::<F>(p, objects) < d { … }`
+/// — der Marsch kann so ganze Strahlsegmente überspringen, ohne in den
+/// ~4 MB Grid-Speicher zu greifen.
+#[cube(fast_math = FastMath::all().difference(FastMath::AllowContraction.into()))]
+pub fn objects_min_bound_distance<F: Float>(
+    p: Vec3<F>,
+    objects: &Tensor<F>,
+    bound_offset: F,
+) -> F {
+    let mut min_d = F::new(1000.0);
+    let n = usize::cast_from(MAX_SDF_OBJECTS);
+    let mut slot = usize::new(0);
+    loop {
+        if slot >= n {
+            break;
+        }
+        let hdr = slot * usize::cast_from(SDF_HEADER_STRIDE);
+        // Inaktiver Slot → komplett überspringen.
+        let active = objects[hdr] > F::new(0.5);
+        if active {
+            let size = objects[hdr + usize::new(2)];
+            let cx = objects[hdr + usize::new(4)];
+            let cy = objects[hdr + usize::new(5)];
+            let cz = objects[hdr + usize::new(6)];
+
+            let dx = p.x - cx;
+            let dy = p.y - cy;
+            let dz = p.z - cz;
+            let sphere_d = (dx * dx + dy * dy + dz * dz).sqrt() - size * F::new(0.5) - bound_offset;
+
+            // Sphere-Distanz ist immer eine *untere* Schranke der echten
+            // Grid-Distanz (die Kugel umschließt das Grid vollständig).
+            if sphere_d < min_d {
+                min_d = sphere_d;
+            }
+        }
+        slot += usize::new(1);
+    }
+    min_d
+}
+
 /// Material des Grid-Treffers aus dem Slot-Header: `mat_id = 2 + slot`.
 /// mat_id 0 = Bounding-Shell (kein echter Treffer) → PBR-Neutralwerte.
 #[cube]

@@ -357,6 +357,55 @@ pub fn scene_data(&self) -> Vec<GpuFloat> {
     packed_data
 }
 
+/// 🟢 OPTIMIZATION 1: Slots separat packen (Stride 8 → Flat-F32-Buffer).
+/// Ersetzt `scene_data()` + Offsets zugunsten eines eigenen GPU-Buffers.
+pub fn slots_data(&self) -> Vec<GpuFloat> {
+    const MAX_SLOTS: usize = 100;
+    let mut packed = vec![0.0_f32 as GpuFloat; MAX_SLOTS * 8];
+    for i in 0..self.slot_types.len() {
+        if i >= MAX_SLOTS { break; }
+        let base = i * 8;
+        packed[base]     = self.slot_types[i] as GpuFloat;
+        packed[base + 1] = self.slot_sizes[i] as GpuFloat;
+        packed[base + 2] = self.slot_offsets_x[i] as GpuFloat;
+        packed[base + 3] = self.slot_offsets_y[i] as GpuFloat;
+        packed[base + 4] = self.slot_offsets_z[i] as GpuFloat;
+        packed[base + 5] = self.slot_r[i] as GpuFloat;
+        packed[base + 6] = self.slot_g[i] as GpuFloat;
+        packed[base + 7] = self.slot_b[i] as GpuFloat;
+    }
+    packed
+}
+
+/// 🟢 OPTIMIZATION 1: Materialien separat packen (Stride 4 → Flat-F32-Buffer).
+pub fn materials_data(&self) -> Vec<GpuFloat> {
+    const MAX_SLOTS: usize = 100;
+    let mut packed = vec![0.0_f32 as GpuFloat; MAX_SLOTS * 4];
+    for i in 0..self.slot_types.len() {
+        if i >= MAX_SLOTS { break; }
+        let base = i * 4;
+        packed[base]     = self.slot_roughness[i] as GpuFloat;
+        packed[base + 1] = self.slot_metallic[i] as GpuFloat;
+        packed[base + 2] = self.slot_emissive[i] as GpuFloat;
+        packed[base + 3] = self.slot_specular[i] as GpuFloat;
+    }
+    packed
+}
+
+/// 🟢 OPTIMIZATION 1: Rotationen separat packen (Stride 3 → Flat-F32-Buffer).
+pub fn rotations_data(&self) -> Vec<GpuFloat> {
+    const MAX_SLOTS: usize = 100;
+    let mut packed = vec![0.0_f32 as GpuFloat; MAX_SLOTS * 3];
+    for i in 0..self.slot_types.len() {
+        if i >= MAX_SLOTS { break; }
+        let base = i * 3;
+        packed[base]     = *self.slot_rot_x.get(i).unwrap_or(&0.0_f32) as GpuFloat;
+        packed[base + 1] = *self.slot_rot_y.get(i).unwrap_or(&0.0_f32) as GpuFloat;
+        packed[base + 2] = *self.slot_rot_z.get(i).unwrap_or(&0.0_f32) as GpuFloat;
+    }
+    packed
+}
+
 /// 🟢 SDF-OBJEKT-TENSOR: Packt die N Grid-Objekt-Slots in den separaten
 /// Objekt-Tensor. Layout (doc/feature/SDF_OBJECT_TENSOR.md):
 /// `[ Header 0 (Stride 24) ]…[ Header N-1 ][ Grid 0 (64³) ]…[ Grid N-1 ]`

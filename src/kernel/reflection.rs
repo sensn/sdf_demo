@@ -18,7 +18,9 @@ pub fn trace_reflection<F: Float>(
     time: F,
     blend_factor: F,
     active_slots: u32,
-    scene: &Tensor<F>, // Mega-Scene-Tensor (Slots/Materials/Rotations)
+    slots: &Tensor<F>,           // 🟢 OPTIMIZATION 1: Flat f32 buffer for SlotData (100 * 8 = 800 f32)
+    materials: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for MaterialData (100 * 4 = 400 f32)
+    rotations: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for RotationData (100 * 3 = 300 f32)
     arch: ArchParams<F>,
     fold: FoldParams<F>,
     // 🟢 SDF-OBJEKT-TENSOR
@@ -58,7 +60,7 @@ pub fn trace_reflection<F: Float>(
         // Komplette Szene: Slots + Arch (scene_sdf) …
         // 💡 KORREKTUR: `scene` anstelle der alten Slices weiterreichen
         let sdf_res = scene_sdf::<F>(
-            p.clone(), time, blend_factor, active_slots, scene, arch.clone(), fold.clone()
+            p.clone(), time, blend_factor, active_slots, slots, materials, rotations, arch.clone(), fold.clone()
         );
         let mut d = sdf_res.d;
         let mut r = sdf_res.r;
@@ -136,7 +138,7 @@ pub fn trace_reflection<F: Float>(
         // Normale über die Map, die den Treffer geliefert hat.
         // 💡 `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
         let sdf_n = scene_sdf_normal::<F>(
-            p.clone(), time, blend_factor, active_slots, scene, arch.clone(), fold.clone()
+            p.clone(), time, blend_factor, active_slots, slots, materials, rotations, arch.clone(), fold.clone()
         );
         let plan_n = calculate_normal::<F>(
             p.clone(), objects, bound_offset,
@@ -145,7 +147,7 @@ pub fn trace_reflection<F: Float>(
         // Wähle per Distanz-Vergleich (keine if-else-Expr für Structs).
         // 💡 `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
         let sdf_d = scene_sdf::<F>(
-            p.clone(), time, blend_factor, active_slots, scene, arch.clone(), fold.clone()
+            p.clone(), time, blend_factor, active_slots, slots, materials, rotations, arch.clone(), fold.clone()
         ).d;
         let plan_d = scene_map_with_material::<F>(
             p.clone(), objects, bound_offset, false,
@@ -181,8 +183,9 @@ pub fn trace_reflection<F: Float>(
             let offset_p = p.add(normal.scale(F::new(0.02)));
             // 💡 KORREKTUR: `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
             let shadow_factor = calculate_soft_shadow::<F>(
-                offset_p, key_dir.clone(), time, blend_factor, active_slots, scene,
-                arch.clone(), fold.clone(), objects, bound_offset, env.shadow_softness_k,
+                offset_p, key_dir.clone(), time, blend_factor, active_slots,
+                slots, materials, rotations, arch.clone(), fold.clone(),
+                objects, bound_offset, env.shadow_softness_k,
             );
             key_visibility = shadow_factor;
         }
@@ -191,8 +194,9 @@ pub fn trace_reflection<F: Float>(
         if render.enable_ao_mode == u32::new(1) {
             // 💡 KORREKTUR: `scene` anstelle der Slices weiterreichen + Turbofisch ergänzt
             ao_factor = calculate_ao::<F>(
-                p.clone(), normal.clone(), time, blend_factor, active_slots, scene,
-                arch.clone(), fold.clone(), objects, bound_offset, env.ao_iterations
+                p.clone(), normal.clone(), time, blend_factor, active_slots,
+                slots, materials, rotations, arch.clone(), fold.clone(),
+                objects, bound_offset, env.ao_iterations
             );
         }
 

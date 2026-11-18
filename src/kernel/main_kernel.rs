@@ -14,7 +14,7 @@ use super::pbr::{aces_tonemap, cook_torrance_light};
 use super::reflection::trace_reflection;
 use super::scene::{scene_sdf, scene_sdf_normal};
 use super::shadows::calculate_soft_shadow;
-use super::statue_grid::{calculate_normal, scene_map_with_material, sdf_object_pbr};
+use super::statue_grid::{calculate_normal, objects_min_bound_distance, scene_map_with_material, sdf_object_pbr};
 use super::types::{ArchParams, CameraSettings, EnvSettings, FoldParams, RenderSettings, Vec3};
 //
 // ALTE IMPORTS ENTFERNEN UND DURCH DIESE ERSETZEN:
@@ -69,11 +69,16 @@ let strategy = if vector_width >= 4 {
 
 //LAUNCH
 // 💡 KORREKTUR: launch_unchecked erlaubt voll-generische Shader-Einstiegspunkte!
-#[cube(launch)] // 💡 Nutzt das Standard-Launch-Makro
+// 🟢 OPTIMIZATION 2: Control float contraction per kernel for SDF precision
+// Disable contraction (AllowContraction) to prevent surface acne/overshoot artifacts
+// while keeping other fast math optimizations.
+#[cube(launch, fast_math = FastMath::all().difference(FastMath::AllowContraction.into()))]
 pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das Generic zurück!
     output: &mut Tensor<F>,
-    scene: &Tensor<F>, // 📦 Mega-Scene-Tensor [slots|materials|rotations]
-    objects: &Tensor<F>, // 🟢 SDF-OBJEKT-TENSOR [header*N|grid*N]
+    slots: &Tensor<F>,           // 🟢 OPTIMIZATION 1: Flat f32 buffer for SlotData (100 * 8 = 800 f32)
+    materials: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for MaterialData (100 * 4 = 400 f32)
+    rotations: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for RotationData (100 * 3 = 300 f32)
+    objects: &Tensor<F>,         // SDF-Objekt-Tensor [header*N|grid*N]
     camera: CameraSettings<F>,
     env: EnvSettings<F>,
     arch: ArchParams<F>,
@@ -88,20 +93,6 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
     let h_val = render.height;
     let t_val = render.time;
     let b_factor = render.blend_factor;
-/*
-    const SLOTS_START: usize = 0;
-    const MATERIALS_START: usize = SLOTS_COUNT;                      // 800
-    const ROTATIONS_START: usize = SLOTS_COUNT + MATERIALS_COUNT;    // 1200
-    const TOTAL_SIZE: usize = ROTATIONS_START + ROTATIONS_COUNT;     // 1500
-    const SDF_GRID_START: usize = TOTAL_SIZE;                        // 1500
-    const SDF_GRID_END: usize = SDF_GRID_START + SDF_GRID_COUNT;     // 263644
-
-    // 💡 Die Slices werden als f32-Views erzeugt
-    let slots: &[f32] = &scene.slice(SLOTS_START, MATERIALS_START);
-    let materials: &[f32] = &scene.slice(MATERIALS_START, ROTATIONS_START);
-    let rotations: &[f32] = &scene.slice(ROTATIONS_START, TOTAL_SIZE);
-    let sdf_grid: &[f32] = &scene.slice(SDF_GRID_START, SDF_GRID_END);
-    */
     let grid_res = u32::cast_from(SDF_GRID_RES);
     let bound_offset = render.bounding_sphere_radius_offset;
     let pillar_spacing = fold.pillar_spacing;
@@ -176,23 +167,16 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
         let mut t = F::new(0.1);
         let mut hit_dist = F::new(100.0);
         
-        // 🟢 PLAN STEP 5: Welches Objekt hat den Strahl getroffen?
-        // false = Slot-Objekt (scene_sdf), true = Plan-Objekt (Pfeiler/Statue).
-        let mut hit_is_plan_obj = false;
-
-        let mut hit_d = F::new(1000.0);
-        let mut hit_r = F::new(0.0);
-        let mut hit_g = F::new(0.0);
-        let mut hit_b = F::new(0.0);
-
-        let mut hit_rough = F::new(0.5);
-        let mut hit_metal = F::new(0.0);
-        let mut hit_emiss = F::new(0.0);
-        let mut hit_spec = F::new(0.5);
+        // 🟢 OPTIMIZATION (Hot-Loop): Welches Objekt hat den Strahl getroffen?
+        //   1 = Slot-Objekt (scene_sdf), 2 = Grid-Bounding-Shell, 3 = Grid selbst.
+        // Statt 8 PBR-Felder pro Schritt zu entpacken, merken wir uns nur die
+        // Quelle und holen das Material EINMAL am Trefferpunkt (S3).
+        let mut hit_mat_source = u32::new(0);
+        let mut hit_mat_id = F::new(0.0);
 
         let mut ray_step = u32::new(0);
         
-        // 🟢 PLAN STEP 6: Glow-Akkumulator
+        // 🟢 OPTIMIZATION (Hot-Loop): Glow-Akkumulator
         let mut glow_r = F::new(0.0);
         let mut glow_g = F::new(0.0);
         let mut glow_b = F::new(0.0);
@@ -206,68 +190,51 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
             let current_rd = final_rd.clone();
             let p = current_ro.add(current_rd.scale(t));
 
-            // 💡 KORREKTUR: Wir übergeben anstelle der Slices nun direkt den `scene`-Tensor!
+            // 1) Slot-SDF (schnelle analytische Formen) — immer nötig.
             let step_res = scene_sdf::<F>(
-                p.clone(), t_val, b_factor, render.active_slots, scene, arch.clone(), fold.clone()
+                p.clone(), t_val, b_factor, render.active_slots, slots, materials, rotations,
+                arch.clone(), fold.clone()
             );
-            
-            hit_d = step_res.d;
-            hit_r = step_res.r;
-            hit_g = step_res.g;
-            hit_b = step_res.b;
-            hit_rough = step_res.roughness;
-            hit_metal = step_res.metallic;
-            hit_emiss = step_res.emissive;
-            hit_spec = step_res.specular;
-            
-            // 🟢 FIX (Bugfix-Runde 3): Flag JEDEM Schritt zurücksetzen
-            hit_is_plan_obj = false;
+            let mut d = step_res.d;
+            let mut step_source = u32::new(1);
 
-            
-            // 🟢 SDF-OBJEKT-TENSOR: Grid-Slots in die Primär-Map mischen.
-            let plan_res = scene_map_with_material::<F>(
-                p.clone(), objects, bound_offset, true,
+            // 2) Grid-Slots NUR sampeln, wenn sie überhaupt näher sein könnten.
+            //    `objects_min_bound_distance` liest nur 4×24 Header-Werte statt
+            //    ~4 MB Voxel-Daten. Liegt der Strahl außerhalb aller Kugeln,
+            //    entfällt der teure Speicherzugriff komplett.
+            let grid_bound_d = objects_min_bound_distance::<F>(
+                p.clone(), objects, bound_offset,
             );
-            if plan_res.d < hit_d {
-                hit_d = plan_res.d;
-                // Nur als Grid-Treffer zählen, wenn ein Slot selbst die
-                // nächste Fläche ist (mat_id = 2 + slot).
-                hit_is_plan_obj = plan_res.mat_id > F::new(1.5);
-                let is_grid = plan_res.mat_id > F::new(1.5);
-                if is_grid {
-                    // Material aus dem Slot-Header (albedo + PBR).
-                    let pbr = sdf_object_pbr::<F>(objects, plan_res.mat_id);
-                    hit_r = pbr.r;
-                    hit_g = pbr.g;
-                    hit_b = pbr.b;
-                    hit_rough = pbr.roughness;
-                    hit_metal = pbr.metallic;
-                    hit_emiss = pbr.emissive;
-                    hit_spec = pbr.specular;
-                } else {
-                    // Bounding-Shell-Treffer: Pfeiler-Nahwerte (in der
-                    // Praxis trifft dann scene_sdf vor dem Break).
-                    hit_r = F::new(0.55);
-                    hit_g = F::new(0.52);
-                    hit_b = F::new(0.5);
-                    hit_rough = render.pillar_roughness;
-                    hit_metal = F::new(0.0);
-                    hit_emiss = F::new(0.0);
-                    hit_spec = F::new(0.5);
+            if grid_bound_d < d {
+                let plan_res = scene_map_with_material::<F>(
+                    p.clone(), objects, bound_offset, true,
+                );
+                if plan_res.d < d {
+                    d = plan_res.d;
+                    // 3 = echtes Grid (Header-PBR), 2 = nur Bounding-Shell.
+                    step_source = select(plan_res.mat_id > F::new(1.5), u32::new(3), u32::new(2));
+                    hit_mat_id = plan_res.mat_id;
                 }
             }
-            
-            // 🟢 PLAN STEP 6: Glow-Akkumulation
-            let glow_kernel = F::new(0.01) / (hit_d + F::new(0.02));
-            glow_r += glow_kernel * step_res.emissive * step_res.r;
-            glow_g += glow_kernel * step_res.emissive * step_res.g;
-            glow_b += glow_kernel * step_res.emissive * step_res.b;
 
-            if hit_d < F::new(0.001) {
+            // 3) Glow-Akkumulation: nur Slot-Objekte, die wirklich die nächste
+            //    Fläche sind (sonst leuchtete ein verdecktes Objekt durch).
+            if step_source == u32::new(1) && step_res.emissive > F::new(0.0) {
+                let glow_kernel = F::new(0.01) / (d + F::new(0.02));
+                glow_r += glow_kernel * step_res.emissive * step_res.r;
+                glow_g += glow_kernel * step_res.emissive * step_res.g;
+                glow_b += glow_kernel * step_res.emissive * step_res.b;
+            }
+
+            // 4) NaN-sicherer Hit-Test (CubeCL #2121): `!(d >= eps)` ist wahr,
+            //    wenn d < eps ODER d == NaN — der Strahl bricht sofort ab,
+            //    statt alle 100 Schritte leer zu drehen.
+            if !(d >= F::new(0.001)) {
                 hit_dist = t;
+                hit_mat_source = step_source;
                 break;
             }
-            t += hit_d;
+            t += d;
 
             if t > F::new(40.0) {
                 break;
@@ -287,13 +254,53 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
         if hit_dist < F::new(40.0) {
             let p = ro.add(final_rd.scale(hit_dist));
             
-            // 🟢 PLAN STEP 5: Normale über die Map, die den Treffer geliefert hat
+            // 🟢 OPTIMIZATION (S3): Material EINMAL am Trefferpunkt ermitteln
+            // (vorher wurden 8 PBR-Felder in JEDEM Iterationsschritt entpackt).
+            // hit_mat_source: 1 = Slot-Objekt, 2 = Bounding-Shell, 3 = Grid.
+            let mut hit_r = F::new(0.55);
+            let mut hit_g = F::new(0.52);
+            let mut hit_b = F::new(0.5);
+            let mut hit_rough = render.pillar_roughness;
+            let mut hit_metal = F::new(0.0);
+            let mut hit_emiss = F::new(0.0);
+            let mut hit_spec = F::new(0.5);
+
+            if hit_mat_source == u32::new(1) {
+                // Slot-Objekt: vollständiges Material aus der Szene.
+                let mat_res = scene_sdf::<F>(
+                    p.clone(), t_val, b_factor, render.active_slots, slots, materials, rotations,
+                    arch.clone(), fold.clone(),
+                );
+                hit_r = mat_res.r;
+                hit_g = mat_res.g;
+                hit_b = mat_res.b;
+                hit_rough = mat_res.roughness;
+                hit_metal = mat_res.metallic;
+                hit_emiss = mat_res.emissive;
+                hit_spec = mat_res.specular;
+            } else if hit_mat_source == u32::new(3) {
+                // Echtes Grid-Treffer: Albedo + PBR aus dem Slot-Header.
+                let pbr = sdf_object_pbr::<F>(objects, hit_mat_id);
+                hit_r = pbr.r;
+                hit_g = pbr.g;
+                hit_b = pbr.b;
+                hit_rough = pbr.roughness;
+                hit_metal = pbr.metallic;
+                hit_emiss = pbr.emissive;
+                hit_spec = pbr.specular;
+            }
+            // hit_mat_source == 2 (Bounding-Shell): behält die steinigen
+            // Defaults oben — in der Praxis folgt scene_sdf näher.
+
+            // 🟢 OPTIMIZATION (S3): Normale NUR über die Map, die wirklich den
+            // Treffer geliefert hat. Der alte Code lief bei JEDEM Treffer in
+            // die Grid-Normale (6 × 64³-Voxel-Sampling), sobald irgendwann
+            // einmal plan_res.d < hit_d war — auch bei bloßen Pfeiler-Treffern.
             let mut n_x = F::new(0.0);
-            let mut n_y = F::new(0.0);
+            let mut n_y = F::new(1.0);
             let mut n_z = F::new(0.0);
-            
-            if hit_is_plan_obj {
-                // 🟢 SDF-OBJEKT-TENSOR
+
+            if hit_mat_source >= u32::new(2) {
                 let n = calculate_normal::<F>(
                     p.clone(), objects, bound_offset,
                 );
@@ -301,9 +308,9 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
                 n_y = n.y;
                 n_z = n.z;
             } else {
-                // 💡 KORREKTUR: Signaturen-Anpassung, reicht `scene` statt der Slices nach unten weiter
                 let n = scene_sdf_normal::<F>(
-                    p.clone(), t_val, b_factor, render.active_slots, scene, arch.clone(), fold.clone()
+                    p.clone(), t_val, b_factor, render.active_slots, slots, materials, rotations,
+                    arch.clone(), fold.clone(),
                 );
                 n_x = n.x;
                 n_y = n.y;
@@ -325,9 +332,10 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
             let mut key_visibility = F::new(1.0);
             if render.shadow_mode == u32::new(1) {
                 let offset_p = p.add(normal.scale(F::new(0.02)));
-                // 💡 KORREKTUR: Übergabe von `scene` statt der Slices slots/materials/rotations/sdf_grid
+                // 💡 KORREKTUR: Übergabe von `slots/materials/rotations` statt der Slices
                 let shadow_factor = calculate_soft_shadow::<F>(
-                    offset_p, key_dir.clone(), t_val, b_factor, render.active_slots, scene,
+                    offset_p, key_dir.clone(), t_val, b_factor, render.active_slots,
+                    slots, materials, rotations,
                     arch.clone(), fold.clone(), objects, bound_offset, env.shadow_softness_k,
                 );
                 key_visibility = shadow_factor;
@@ -335,9 +343,10 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
 
             let mut ao_factor = F::new(1.0);
             if render.enable_ao_mode == u32::new(1) {
-                // 💡 KORREKTUR: Übergabe von `scene` statt der Slices slots/materials/rotations/sdf_grid
+                // 💡 KORREKTUR: Übergabe von `slots/materials/rotations` statt der Slices
                 ao_factor = calculate_ao::<F>(
-                    p.clone(), normal.clone(), t_val, b_factor, render.active_slots, scene,
+                    p.clone(), normal.clone(), t_val, b_factor, render.active_slots,
+                    slots, materials, rotations,
                     arch.clone(), fold.clone(), objects, bound_offset, env.ao_iterations
                 );
             }
@@ -407,14 +416,16 @@ pub fn raymarch_sdf_kernel<F: Float + LaunchArg>( // 💡 KORREKTUR: Bringe das 
             if hit_rough < render.reflection_roughness_gate {
                 let refl_dir = final_rd.sub(normal.scale(F::new(2.0) * final_rd.dot(normal.clone()))).normalize();
 
-                               // 💡 KORREKTUR: Reicht `scene` statt der Slices slots/materials/rotations/sdf_grid an trace_reflection weiter
+                               // 💡 KORREKTUR: Reicht `slots/materials/rotations` statt der Slices an trace_reflection weiter
                 let refl_color = trace_reflection::<F>(
                     p.add(normal.scale(F::new(0.02))),
                     refl_dir,
                     t_val,
                     b_factor,
                     render.active_slots,
-                    scene,
+                    slots,
+                    materials,
+                    rotations,
                     arch.clone(),
                     fold.clone(),
                     objects,

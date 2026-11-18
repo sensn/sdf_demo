@@ -16,7 +16,9 @@ pub fn calculate_ao<F: Float>(
     time: F,
     blend_factor: F,
     active_slots: u32,
-    scene: &Tensor<F>, // Mega-Scene-Tensor (Slots/Materials/Rotations)
+    slots: &Tensor<F>,           // 🟢 OPTIMIZATION 1: Flat f32 buffer for SlotData (100 * 8 = 800 f32)
+    materials: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for MaterialData (100 * 4 = 400 f32)
+    rotations: &Tensor<F>,       // 🟢 OPTIMIZATION 1: Flat f32 buffer for RotationData (100 * 3 = 300 f32)
     arch: ArchParams<F>,
     fold: FoldParams<F>,
     // 🟢 SDF-OBJEKT-TENSOR: Grid-Slots tragen ebenfalls zur Okklusion bei.
@@ -45,9 +47,10 @@ pub fn calculate_ao<F: Float>(
         let hr = (i + F::new(1.0)) * F::new(0.15);
         let ao_pos = current_p.add(current_normal.scale(hr));
 
-        // 💡 KORREKTUR: `scene` anstelle der alten Slices weiterreichen
+        // 💡 KORREKTUR: `slots/materials/rotations` statt der alten Slices weiterreichen
         let sdf_res = scene_sdf::<F>(
-            ao_pos.clone(), time, blend_factor, active_slots, scene,
+            ao_pos.clone(), time, blend_factor, active_slots,
+            slots, materials, rotations,
             arch.clone(), fold.clone()
         );
         let mut dd = sdf_res.d;
