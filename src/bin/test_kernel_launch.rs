@@ -6,6 +6,8 @@
 mod app_state;
 #[path = "../gpu.rs"]
 mod gpu;
+#[path = "../gpu_iced.rs"]
+mod gpu_iced;
 #[path = "../kernel/mod.rs"]
 mod kernel;
 #[path = "../sdf_preprocessor.rs"]

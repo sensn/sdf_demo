@@ -17,6 +17,7 @@ mod kernel;
 pub mod render_loop;
 pub mod sdf_preprocessor;
 pub mod view;
+pub mod gpu_iced;
 
 use app_state::ApplicationState;
 use gpu::GpuPipeline;

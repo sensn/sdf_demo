@@ -8,6 +8,7 @@
 
 /// Kompilierte Kernel-Register (Tensor 4/5/6) — Reihenfolge ist ABI mit
 /// src/kernel.rs (env/arch/fold-Blöcke). NICHT umsortieren!
+#[derive(Clone, Debug)]
 pub struct ApplicationState {
     // 🟢 DYNAMISCHES SLOT-SYSTEM STATE
     pub current_selected_slot: usize,
@@ -280,7 +281,7 @@ use crate::kernel::{
     GpuVec3Launch, RenderSettingsLaunch,
 };
 // 🟢 Bringe den zentralen Typ-Alias in den Scope (Passe den Pfad ggf. an deine Struktur an)
- use crate::gpu::GpuFloat;
+ use crate::gpu_iced::GpuFloat;
 use std::sync::Arc;
 
 
@@ -415,7 +416,7 @@ pub fn rotations_data(&self) -> Vec<GpuFloat> {
 /// Grids kommen aus dem Prozess-Cache (`get_or_bake_grid`) — leere/
 /// inaktive Slots schreiben ein "weit weg"-Grid (d = 1e6).
 pub fn sdf_objects_data(&self) -> Vec<GpuFloat> {
-    use crate::gpu::{MAX_SDF_OBJECTS, SDF_HEADER_STRIDE, SDF_GRID_COUNT};
+    use crate::gpu_iced::{MAX_SDF_OBJECTS, SDF_HEADER_STRIDE, SDF_GRID_COUNT};
 
     const N: usize = MAX_SDF_OBJECTS;
     let grid_count = SDF_GRID_COUNT;
@@ -443,7 +444,7 @@ pub fn sdf_objects_data(&self) -> Vec<GpuFloat> {
         let active = self.sdf_active.get(slot).copied().unwrap_or(false)
             && !self.sdf_paths.get(slot).map(|s| s.is_empty()).unwrap_or(true);
         packed[hdr]     = if active { 1.0 as GpuFloat } else { 0.0 as GpuFloat };
-        packed[hdr + 1] = crate::gpu::SDF_GRID_RES as f32 as GpuFloat; // res
+        packed[hdr + 1] = crate::gpu_iced::SDF_GRID_RES as f32 as GpuFloat; // res
         packed[hdr + 2] = *self.sdf_sizes.get(slot).unwrap_or(&4.0) as GpuFloat;
         packed[hdr + 3] = 0.0 as GpuFloat; // pad
         packed[hdr + 4] = *self.sdf_center_x.get(slot).unwrap_or(&0.0) as GpuFloat;

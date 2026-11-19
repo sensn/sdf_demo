@@ -6,7 +6,7 @@ use cubecl::frontend::CubeType;
 use cubecl::prelude::*;
 
 
-use crate::gpu::{SDF_GRID_RES, MATERIALS_COUNT, ROTATIONS_COUNT, SLOTS_COUNT};
+use crate::gpu_iced::{SDF_GRID_RES, MATERIALS_COUNT, ROTATIONS_COUNT, SLOTS_COUNT};
 
 use super::ao::calculate_ao;
 use super::fog::integrate_volumetric_fog;

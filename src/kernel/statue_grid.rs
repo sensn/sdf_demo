@@ -6,7 +6,7 @@
 
 use cubecl::frontend::CubeType;
 use cubecl::prelude::*;
-use crate::gpu::{MAX_SDF_OBJECTS, SDF_HEADER_STRIDE};
+use crate::gpu_iced::{MAX_SDF_OBJECTS, SDF_HEADER_STRIDE};
 use super::types::{SdfResult, Vec3};
 
 // ============================================================================
@@ -258,7 +258,7 @@ pub fn scene_map_with_material<F: Float>(
 
                 let rotated = Vec3::<F>::new(rx2, ry3, rz3);
 
-                let g_start = sdf_grid_start() + slot * usize::cast_from(crate::gpu::SDF_GRID_COUNT);
+                let g_start = sdf_grid_start() + slot * usize::cast_from(crate::gpu_iced::SDF_GRID_COUNT);
                 let d_obj = sample_sdf_grid::<F>(rotated, objects, g_start, res, size);
                 if d_obj < d_scene {
                     d_scene = d_obj;
