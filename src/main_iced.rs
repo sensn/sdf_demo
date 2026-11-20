@@ -34,6 +34,7 @@ use iced::time::Instant;
 use iced::widget::{button, center, column, container, popover, row, scrollable, shader, slider, space, stack, text, toggler};
 use iced::{Alignment, Color, Fill, Padding, Subscription, Task, Widget};
 use iced::{event, keyboard, mouse, window};
+use iced::widget::{mouse_area, opaque};
 
 fn main() -> iced::Result {
     iced::application(IcedSdf::default, IcedSdf::update, IcedSdf::view)
@@ -45,8 +46,8 @@ fn main() -> iced::Result {
 // =========================================================================
 // Theme colors (ported 1:1 from src/gui/mod.rs)
 // =========================================================================
-const PANEL_BG: Color = Color::from_rgba8(0x10, 0x12, 0x1a,0.0);
-const MENUBAR_BG: Color = Color::from_rgb8(0x16, 0x19, 0x23);
+const PANEL_BG: Color = Color::from_rgba8(0x10, 0x12, 0x1a,0.3);
+const MENUBAR_BG: Color = Color::from_rgba8(0x16, 0x19, 0x23,0.5);
 const BORDER: Color = Color::from_rgb8(0x1c, 0x1e, 0x26);
 const MENU_BORDER: Color = Color::from_rgb8(0x22, 0x26, 0x34);
 const ACCENT: Color = Color::from_rgb8(0x00, 0xff, 0xcc);
@@ -119,7 +120,7 @@ enum Message {
     MenuToggled(bool),
     MenuAction(MenuAction),
     SdfFilePicked(Option<PathBuf>),
-
+    GuiHovered(bool),
     // -- Scalar sliders --------------------------------------------------
     LightIntensity(f32),
     AmbientStrength(f32),
@@ -220,6 +221,7 @@ struct IcedSdf {
     menu_open: bool,
     last_mouse_x: f32,
     last_mouse_y: f32,
+    pointer_over_gui: bool,
 }
 
 impl Default for IcedSdf {
@@ -230,6 +232,7 @@ impl Default for IcedSdf {
             fps: 0.0,
             scene: SdfScene::new(),
             show_gui: true,
+            pointer_over_gui: false,
             active_tab: Tab::default(),
             accordion: [
                 vec![true, false, false, false, false], // Env
@@ -264,7 +267,12 @@ impl IcedSdf {
                 update_camera_movement(&mut self.scene.state, dt);
                 Task::none()
             }
-
+           
+             Message::GuiHovered(hovered) => {
+             self.pointer_over_gui = hovered;
+             Task::none()
+             }
+            
             Message::Event(event) => self.handle_event(event),
 
             // -- GUI chrome ------------------------------------------------
@@ -720,35 +728,39 @@ impl IcedSdf {
                 }
                 Task::none()
             }
-            event::Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                // Original applies look unconditionally (no button check).
-                let dx = position.x - self.last_mouse_x;
-                let dy = position.y - self.last_mouse_y;
-                if dx != 0.0 || dy != 0.0 {
-                    let s = &mut self.scene.state;
-                    let max_pitch = 89.0f32.to_radians();
-                    s.cam_yaw += dx * MOUSE_SENSITIVITY;
-                    s.cam_pitch -= dy * MOUSE_SENSITIVITY;
-                    s.cam_pitch = s.cam_pitch.clamp(-max_pitch, max_pitch);
-                }
-                self.last_mouse_x = position.x;
-                self.last_mouse_y = position.y;
-                Task::none()
-            }
-            event::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                let (dx, dy) = match delta {
-                    mouse::ScrollDelta::Pixels { x, y } => (-x, -y),
-                    mouse::ScrollDelta::Lines { x, y } => (-x * 20.0, -y * 20.0),
-                };
-                if dx != 0.0 || dy != 0.0 {
-                    let s = &mut self.scene.state;
-                    let max_pitch = 89.0f32.to_radians();
-                    let sens = MOUSE_SENSITIVITY * 1.5;
-                    s.cam_yaw += dx * sens;
-                    s.cam_pitch -= dy * sens;
-                    s.cam_pitch = s.cam_pitch.clamp(-max_pitch, max_pitch);
-                }
-                Task::none()
+          event::Event::Mouse(mouse::Event::CursorMoved { position }) => {
+    if !(self.show_gui && self.pointer_over_gui) {
+        let dx = position.x - self.last_mouse_x;
+        let dy = position.y - self.last_mouse_y;
+        if dx != 0.0 || dy != 0.0 {
+            let s = &mut self.scene.state;
+            let max_pitch = 89.0f32.to_radians();
+            s.cam_yaw += dx * MOUSE_SENSITIVITY;
+            s.cam_pitch -= dy * MOUSE_SENSITIVITY;
+            s.cam_pitch = s.cam_pitch.clamp(-max_pitch, max_pitch);
+        }
+    }
+    self.last_mouse_x = position.x;
+    self.last_mouse_y = position.y;
+    Task::none()
+}
+event::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+    if !(self.show_gui && self.pointer_over_gui) {
+        let (dx, dy) = match delta {
+            mouse::ScrollDelta::Pixels { x, y } => (-x, -y),
+            mouse::ScrollDelta::Lines { x, y } => (-x * 20.0, -y * 20.0),
+        };
+        if dx != 0.0 || dy != 0.0 {
+            let s = &mut self.scene.state;
+            let max_pitch = 89.0f32.to_radians();
+            let sens = MOUSE_SENSITIVITY * 1.5;
+            s.cam_yaw += dx * sens;
+            s.cam_pitch -= dy * sens;
+            s.cam_pitch = s.cam_pitch.clamp(-max_pitch, max_pitch);
+        }
+    }
+    Task::none()
+
             }
             _ => Task::none(),
         }
@@ -859,11 +871,20 @@ impl IcedSdf {
         let shader_widget = shader(&self.scene).width(Fill).height(Fill);
 
         let base: iced::Element<'_, Message> = if self.show_gui {
-            let sidebar = self.sidebar();
-            let menubar = self.menubar();
+            let sidebar = opaque(
+                mouse_area(self.sidebar())
+                    .on_enter(Message::GuiHovered(true))
+                    .on_exit(Message::GuiHovered(false)),
+            );
+
+            let menubar = opaque(
+                mouse_area(container(self.menubar()).width(Fill).height(32))
+                    .on_enter(Message::GuiHovered(true))
+                    .on_exit(Message::GuiHovered(false)),
+            );
 
             let gui_overlay = column![
-                container(menubar).width(Fill).height(32),
+                menubar,
                 row![
                     iced::widget::Space::new().width(Fill),
                     sidebar,
@@ -891,7 +912,6 @@ impl IcedSdf {
 
         base
     }
-
 
     fn menubar(&self) -> impl Widget<Message> {
         let trigger = button(text("Datei").color(TEXT).size(12))
@@ -970,14 +990,16 @@ impl IcedSdf {
             .width(SIDEBAR_W)
             .height(Fill)
             .style(|_: &iced::Theme| container::Style {
-                background: Some(iced::Background::Color(PANEL_BG)),
-                border: iced::Border {
-                    color: BORDER,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
+        background: Some(iced::Background::Color(PANEL_BG)),
+        border: iced::Border::default(),
+        shadow: iced::Shadow {
+            color: Color::from_rgba8(0x00, 0x00, 0x00, 0.45),
+            offset: iced::Vector::new(-4.0, 0.0), // Shifts shadow slightly left toward the viewport
+            blur_radius: 16.0,
+        },
+        snap: true,
+        ..Default::default()
+    })
     }
 
     fn tab_content(&self) -> iced::Element<'_, Message> {
