@@ -359,7 +359,8 @@ impl iced::widget::shader::Pipeline for SdfPipeline {
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
-                        blend: Some(wgpu::BlendState::REPLACE),
+                         blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        //blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),

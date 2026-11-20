@@ -45,7 +45,7 @@ fn main() -> iced::Result {
 // =========================================================================
 // Theme colors (ported 1:1 from src/gui/mod.rs)
 // =========================================================================
-const PANEL_BG: Color = Color::from_rgb8(0x10, 0x12, 0x1a);
+const PANEL_BG: Color = Color::from_rgba8(0x10, 0x12, 0x1a,0.0);
 const MENUBAR_BG: Color = Color::from_rgb8(0x16, 0x19, 0x23);
 const BORDER: Color = Color::from_rgb8(0x1c, 0x1e, 0x26);
 const MENU_BORDER: Color = Color::from_rgb8(0x22, 0x26, 0x34);
@@ -861,18 +861,28 @@ impl IcedSdf {
         let base: iced::Element<'_, Message> = if self.show_gui {
             let sidebar = self.sidebar();
             let menubar = self.menubar();
-            let content = column![
+
+            let gui_overlay = column![
                 container(menubar).width(Fill).height(32),
-                row![shader_widget, sidebar].width(Fill).height(Fill),
+                row![
+                    iced::widget::Space::new().width(Fill),
+                    sidebar,
+                ]
+                .width(Fill)
+                .height(Fill),
             ]
             .width(Fill)
             .height(Fill);
 
-            // FPS overlay floats top-left above everything (Stack).
+            // Shader at Layer 0, GUI overlay at Layer 1, FPS text at Layer 2
             container(
-                stack![content, text(format!("FPS: {:.1}", self.fps)).color(ACCENT).size(20)]
-                    .width(Fill)
-                    .height(Fill),
+                stack![
+                    shader_widget,
+                    gui_overlay,
+                    text(format!("FPS: {:.1}", self.fps)).color(ACCENT).size(20),
+                ]
+                .width(Fill)
+                .height(Fill),
             )
             .boxed()
         } else {
@@ -881,6 +891,7 @@ impl IcedSdf {
 
         base
     }
+
 
     fn menubar(&self) -> impl Widget<Message> {
         let trigger = button(text("Datei").color(TEXT).size(12))
