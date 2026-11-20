@@ -729,7 +729,7 @@ impl IcedSdf {
                 Task::none()
             }
           event::Event::Mouse(mouse::Event::CursorMoved { position }) => {
-    if !(self.show_gui && self.pointer_over_gui) {
+    if !(self.show_gui && (self.pointer_over_gui || self.menu_open)) {
         let dx = position.x - self.last_mouse_x;
         let dy = position.y - self.last_mouse_y;
         if dx != 0.0 || dy != 0.0 {
@@ -883,24 +883,38 @@ impl IcedSdf {
                     .on_exit(Message::GuiHovered(false)),
             );
 
-            let gui_overlay = column![
-                menubar,
-                row![
-                    iced::widget::Space::new().width(Fill),
-                    sidebar,
-                ]
-                .width(Fill)
-                .height(Fill),
-            ]
-            .width(Fill)
-            .height(Fill);
+            let gui_overlay = row![
+    // Left side: menubar sits at top-left, open space below
+    column![
+        menubar,
+        iced::widget::Space::new().height(Fill),
+    ]
+    .width(Fill)
+    .height(Fill),
+    // Right side: sidebar starts at the very top (y = 0) and spans full height
+    sidebar,
+]
+.width(Fill)
+.height(Fill);
+            
+            let fps_overlay = container(
+    text(format!("FPS: {:.1}", self.fps))
+        .color(ACCENT)
+        .size(20),
+)
+.padding(iced::Padding {
+    top: 40.0,  // Clears the 32px menubar + 8px margin
+    left: 12.0,
+    right: 0.0,
+    bottom: 0.0,
+});
 
             // Shader at Layer 0, GUI overlay at Layer 1, FPS text at Layer 2
             container(
                 stack![
                     shader_widget,
                     gui_overlay,
-                    text(format!("FPS: {:.1}", self.fps)).color(ACCENT).size(20),
+                    fps_overlay,
                 ]
                 .width(Fill)
                 .height(Fill),
@@ -926,46 +940,55 @@ impl IcedSdf {
     }
 
     fn menu_popup(&self) -> impl Widget<Message> {
-        let item =
-            |label: &'static str, msg: Message| -> iced::Element<Message> {
-                button(
-                    container(text(label).color(TEXT).size(11))
-                        .width(200)
-                        .align_x(iced::alignment::Horizontal::Left),
-                )
-                .padding([6, 12])
-                .style(button::text)
-                .on_press(msg)
-                .boxed()
-            };
-        let separator = || space().height(1).width(Fill);
+    let item =
 
-        container(
-            column![
-                item("Zurücksetzen", Message::MenuAction(MenuAction::ResetScene)),
-                separator(),
-                item("Ambient Occlusion", Message::MenuAction(MenuAction::ToggleAo)),
-                item("Key Light toggeln", Message::MenuAction(MenuAction::ToggleKeyLight)),
-                separator(),
-                item("SDF-Objekt laden…", Message::MenuAction(MenuAction::LoadSdfObject)),
-                separator(),
-                item("Beenden", Message::MenuAction(MenuAction::Exit)),
-            ]
-            .spacing(2)
-            .padding(4),
-        )
-        .width(210)
-        .padding(2)
-        .style(|_: &iced::Theme| container::Style {
-            background: Some(iced::Background::Color(MENUBAR_BG)),
-            border: iced::Border {
-                color: MENU_BORDER,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        })
-    }
+        |label: &'static str, msg: Message| -> iced::Element<Message> {
+            button(
+                container(text(label).color(TEXT).size(11))
+                    .width(200)
+                    .align_x(iced::alignment::Horizontal::Left),
+            )
+            .padding([6, 12])
+            .style(button::text)
+            .on_press(msg)
+            .boxed()
+        };
+    let separator = || space().height(1).width(Fill);
+
+    let popup_box = container(
+        column![
+            item("Zurücksetzen", Message::MenuAction(MenuAction::ResetScene)),
+            separator(),
+            item("Ambient Occlusion", Message::MenuAction(MenuAction::ToggleAo)),
+            item("Key Light toggeln", Message::MenuAction(MenuAction::ToggleKeyLight)),
+
+            separator(),
+            item("SDF-Objekt laden…", Message::MenuAction(MenuAction::LoadSdfObject)),
+            separator(),
+            item("Beenden", Message::MenuAction(MenuAction::Exit)),
+        ]
+        .spacing(2)
+        .padding(4),
+    )
+    .width(210)
+    .padding(2)
+    .style(|_: &iced::Theme| container::Style {
+        background: Some(iced::Background::Color(MENUBAR_BG)),
+        border: iced::Border {
+            color: MENU_BORDER,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    });
+
+    opaque(
+        mouse_area(popup_box)
+            .on_enter(Message::GuiHovered(true))
+            .on_exit(Message::GuiHovered(false)),
+    )
+}
+
 
     // -- Sidebar -------------------------------------------------------------
     fn sidebar(&self) -> impl Widget<Message> {
