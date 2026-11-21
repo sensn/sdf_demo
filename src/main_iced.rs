@@ -37,11 +37,15 @@ use iced::{event, keyboard, mouse, window};
 use iced::widget::{mouse_area, opaque};
 
 fn main() -> iced::Result {
-    iced::application(IcedSdf::default, IcedSdf::update, IcedSdf::view)
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook::set_once();
+
+    iced::application(IcedSdf::new, IcedSdf::update, IcedSdf::view)
         .subscription(IcedSdf::subscription)
         .theme(|_: &IcedSdf| iced::Theme::Dark)
         .run()
 }
+
 
 // =========================================================================
 // Theme colors (ported 1:1 from src/gui/mod.rs)
@@ -111,6 +115,7 @@ enum MenuAction {
 // =========================================================================
 #[derive(Debug, Clone)]
 enum Message {
+    GpuAdapterReady,
     Tick(Instant),
     Event(event::Event),
 
@@ -119,7 +124,7 @@ enum Message {
     AccordionToggled { tab: Tab, index: usize },
     MenuToggled(bool),
     MenuAction(MenuAction),
-    SdfFilePicked(Option<PathBuf>),
+    SdfFilePicked(Option<(String, Vec<u8>)>),
     GuiHovered(bool),
     // -- Scalar sliders --------------------------------------------------
     LightIntensity(f32),
@@ -214,6 +219,7 @@ struct IcedSdf {
     last_frame: Instant,
     fps: f32,
     scene: SdfScene,
+    gpu_ready: bool,
     show_gui: bool,
     active_tab: Tab,
     /// Open/closed state per tab (same indices as the wgpui Accordion).
@@ -222,6 +228,7 @@ struct IcedSdf {
     last_mouse_x: f32,
     last_mouse_y: f32,
     pointer_over_gui: bool,
+    
 }
 
 impl Default for IcedSdf {
@@ -231,6 +238,7 @@ impl Default for IcedSdf {
             last_frame: Instant::now(),
             fps: 0.0,
             scene: SdfScene::new(),
+            gpu_ready: false,
             show_gui: true,
             pointer_over_gui: false,
             active_tab: Tab::default(),
@@ -254,8 +262,19 @@ impl Default for IcedSdf {
 // Update
 // =========================================================================
 impl IcedSdf {
+fn new() -> (Self, Task<Message>) {
+    (
+        Self::default(),
+        Task::perform(gpu_iced::init_wgpu_adapter(), |_| Message::GpuAdapterReady),
+    )
+}
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::GpuAdapterReady => {
+                self.gpu_ready = true;
+                Task::none()
+            }
+        
             Message::Tick(now) => {
                 self.scene.elapsed = (now - self.start).as_secs_f32();
                 let dt = (now - self.last_frame).as_secs_f32();
@@ -292,17 +311,18 @@ impl IcedSdf {
                 Task::none()
             }
             Message::MenuAction(action) => self.menu_action(action),
-            Message::SdfFilePicked(path) => {
-                if let Some(path) = path {
-                    let s = &mut self.scene.state;
-                    let slot = s.current_selected_sdf_object;
-                    if slot < s.sdf_paths.len() {
-                        s.sdf_paths[slot] = path.display().to_string();
-                        s.sdf_active[slot] = true;
-                    }
-                }
-                Task::none()
-            }
+         Message::SdfFilePicked(file) => {
+    if let Some((name, bytes)) = file {
+        let s = &mut self.scene.state;
+        let slot = s.current_selected_sdf_object;
+        if slot < s.sdf_paths.len() {
+            s.sdf_paths[slot] = name;
+            s.sdf_active[slot] = true;
+             s.sdf_bytes[slot] = Some(bytes); // <-- store bytes here for the SDF loader
+        }
+    }
+    Task::none()
+}
 
             // -- Scalar sliders ---------------------------------------------
             Message::LightIntensity(v) => {
@@ -614,6 +634,9 @@ impl IcedSdf {
                 if slot < s.sdf_active.len() {
                     s.sdf_active[slot] = false;
                     s.sdf_paths[slot].clear();
+                    if slot < s.sdf_bytes.len() {
+            s.sdf_bytes[slot] = None;
+        }
                 }
                 Task::none()
             }
@@ -653,15 +676,21 @@ impl IcedSdf {
                 s.enable_key = if s.enable_key == 1 { 0 } else { 1 };
                 Task::none()
             }
-            MenuAction::LoadSdfObject => Task::perform(
-                async {
-                    rfd::AsyncFileDialog::new()
-                        .add_filter("OBJ Mesh", &["obj"])
-                        .pick_file()
-                        .await
-                        .map(|handle| handle.path().to_path_buf())
-                },
-                Message::SdfFilePicked,
+           MenuAction::LoadSdfObject => Task::perform(
+    async {
+        if let Some(handle) = rfd::AsyncFileDialog::new()
+            .add_filter("OBJ Mesh", &["obj"])
+            .pick_file()
+            .await
+        {
+            let name = handle.file_name();
+            let bytes = handle.read().await;
+            Some((name, bytes))
+        } else {
+            None
+        }
+    },
+    Message::SdfFilePicked,
             ),
             MenuAction::Exit => window::latest().and_then(window::close),
         }
@@ -868,7 +897,11 @@ fn update_slot_color(s: &mut ApplicationState, idx: usize) {
 // =========================================================================
 impl IcedSdf {
     fn view(&self) -> impl Widget<Message> {
-        let shader_widget = shader(&self.scene).width(Fill).height(Fill);
+        let shader_widget: iced::Element<'_, Message> = if self.gpu_ready {
+        shader(&self.scene).width(Fill).height(Fill).boxed()
+    } else {
+        center(text("Initializing WebGPU...")).boxed()
+    };
 
         let base: iced::Element<'_, Message> = if self.show_gui {
             let sidebar = opaque(

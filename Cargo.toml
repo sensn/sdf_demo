@@ -3,40 +3,64 @@ name = "sdf_demo"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+wgpui = ["dep:wgpui", "dep:wgpui-kit"]
+
 [dependencies]
-wgpui = { version = "0.3.6" }
-wgpui-kit = "0.6.1"
-wgpu = { version = "30.0", default-features = false, features = ["vulkan", "wgsl"] }
-cubecl = { version = "0.12.0-pre.2", features = ["wgpu", "tile"] }
-cubecl-wgpu = "0.12.0-pre.2"
-cubecl-runtime = "0.12.0-pre.2"
-cubecl-zspace = "0.12.0-pre.2"
+# Gated behind the `wgpui` feature so Wasm/iced builds skip them
+wgpui = { version = "0.3.6", optional = true }
+wgpui-kit = { version = "0.6.1", optional = true }
+
+cubecl = { version = "0.12.0-pre.2", default-features = false, features = ["wgpu", "tile"] }
+cubecl-wgpu = { version = "0.12.0-pre.2", default-features = false }
+cubecl-runtime = { version = "0.12.0-pre.2", default-features = false }
+
 bytemuck = { version = "1.16", features = ["derive"] }
-winit = { version = "0.30" }
-tokio = { version = "1.38", features = ["full"] }
 pollster = "0.3"
-#...mouse system input
-evdev = "0.12"
 crossbeam-channel = "0.5"
 tobj = "4.0.5"
 mesh_to_sdf = "0.4.0"
-# 🟢 SDF-OBJEKT-TENSOR: nativer Datei-Dialog (läuft im Hintergrund-Thread)
 rfd = "0.16"
 
-iced = { path = "../iced", features = ["canvas",  "advanced", "fira-sans", "debug", "image", "tokio", "thread-pool", "wgpu", "wayland", "x11", "linux-theme-detection", "web-colors", "crisp", "image", "svg"] } # for local dev  - removed , "tokio" 
-#iced = { git = "https://github.com/iced-rs/iced", branch = "master", features = ["canvas",  "advanced", "fira-sans"] }
-#iced = { git = "https://github.com/iced-rs/iced", rev = "cd04b74ca", features = ["canvas", "advanced"] } # dev version
+# Iced: keep cross-platform features here (removed duplicate "image" and native-only "tokio"/"thread-pool")
+iced = { path = "../iced", features = [
+    "canvas",
+    "advanced",
+    "fira-sans",
+    "debug",
+    "image",
+    "wgpu",
+    "web-colors",
+    "crisp",
+    "svg",
+] }
 
+# Native-only dependencies (will fail on wasm32-unknown-unknown)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { version = "30.0", default-features = false, features = ["vulkan", "wgsl"] }
+winit = "0.30"
+tokio = { version = "1.38", features = ["full"] }
+evdev = "0.12"
+iced = { path = "../iced", features = ["tokio", "thread-pool", "wayland", "x11", "linux-theme-detection"] }
+
+# Wasm-only dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+wgpu = { version = "30.0", default-features = false, features = ["webgpu", "webgl", "wgsl"] }
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+# Binaries
 [[bin]]
 name = "sdf_demo_iced"
 path = "src/main_iced.rs"
 
+[[bin]]
+name = "sdf_demo"
+path = "src/main.rs"
+required-features = ["wgpui"]
 
+[patch.crates-io]
+cubecl-runtime = { path = "../cubecl-runtime" }
 
-# Aktiviere die benötigten Features für cubek
-#cubek = { version = "0.3.0", features = ["tile"] }
-#cubek = { git = "https://github.com/tracel-ai/cubek", features = ["tile"] }
-#cubek = { version = "0.4.0-pre.2", features = ["matmul-tiled"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-console_error_panic_hook = "0.1"

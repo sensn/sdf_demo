@@ -7,8 +7,11 @@
 //! - Das Grid wird als rohe f32-Slice (`.bin`) gecacht, damit der
 //!   teure Bake nur einmal pro Mesh/Resolution läuft.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufReader, BufWriter};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+
 
 /// Auflösung des SDF-Grids (Kantenlänge in Voxeln). Muss mit dem
 /// Kernel (`sample_sdf_grid`) und dem Cache-Header übereinstimmen.
@@ -33,16 +36,14 @@ pub const SDF_GRID_SIZE: f32 = 4.0;
 /// 🟢 PARAM-GUI: `mesh_scale_factor` (0.1..1.0, default 0.8) steuert,
 /// auf welchen Anteil der Einheits-Box das Mesh normalisiert wird
 /// (vorher fest 80%). Wirkt beim (Neu-)Baken des SDF-Grids.
-pub fn load_obj_to_sdf(file_path: &str, resolution: usize, mesh_scale_factor: f32) -> Vec<f32> {
-    let (models, _materials) = tobj::load_obj(
-        file_path,
-        &tobj::LoadOptions {
-            single_index: true,
-            triangulate: true,
-            ..Default::default()
-        },
-    )
-    .unwrap_or_else(|e| panic!("OBJ load failed for {file_path}: {e}"));
+pub fn load_obj_bytes_to_sdf(obj_bytes: &[u8], resolution: usize, mesh_scale_factor: f32) -> Vec<f32> {
+    let mut cursor = std::io::Cursor::new(obj_bytes);
+    let (models, _materials) = tobj::load_obj_buf(
+        &mut cursor,
+        &tobj::GPU_LOAD_OPTIONS, // match your existing options
+
+        |_| Err(tobj::LoadError::OpenFileFailed),
+    ).expect("Failed to parse OBJ bytes");
 
     // Vertices + Triangle-List-Indices aller Modelle zusammenführen.
     let mut vertices: Vec<[f32; 3]> = Vec::new();
@@ -124,11 +125,17 @@ pub fn load_obj_to_sdf(file_path: &str, resolution: usize, mesh_scale_factor: f3
         .map(|p| [p[0] / mesh_scale, p[1] / mesh_scale, p[2] / mesh_scale])
         .collect();
 
+       #[cfg(not(target_arch = "wasm32"))]
+    let accel = mesh_to_sdf::AccelerationMethod::RtreeBvh;
+    #[cfg(target_arch = "wasm32")]
+    let accel = mesh_to_sdf::AccelerationMethod::Bvh(mesh_to_sdf::SignMethod::Raycast);
+
+
     let sdf = mesh_to_sdf::generate_sdf(
         &vertices,
         mesh_to_sdf::Topology::TriangleList(Some(&indices)),
         &mesh_queries,
-        mesh_to_sdf::AccelerationMethod::RtreeBvh,
+        accel,
     );
 
     // Zurück in Welt-Einheiten; Grid in ZYX-Reihenfolge (passt zu
@@ -136,7 +143,14 @@ pub fn load_obj_to_sdf(file_path: &str, resolution: usize, mesh_scale_factor: f3
     sdf.into_iter().map(|d| d * mesh_scale).collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_obj_to_sdf(file_path: &str, resolution: usize, mesh_scale_factor: f32) -> Vec<f32> {
+    let bytes = std::fs::read(file_path).expect("Failed to read OBJ file");
+    load_obj_bytes_to_sdf(&bytes, resolution, mesh_scale_factor)
+}
+
 /// Speichert das SDF-Grid als rohe f32-Binärdatei (Header: magic + res).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn save_sdf_cache(path: &str, data: &[f32]) -> std::io::Result<()> {
     let file = std::fs::File::create(path)?;
     let mut w = BufWriter::new(file);
@@ -151,6 +165,7 @@ pub fn save_sdf_cache(path: &str, data: &[f32]) -> std::io::Result<()> {
 
 /// Lädt das SDF-Grid aus der Roh-Binärdatei. `size` = erwartete
 /// Elementzahl (res^3). Fällt bei Header/Größen-Mismatch hart aus.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_sdf_cache(path: &str, size: usize) -> std::io::Result<Vec<f32>> {
     let file = std::fs::File::open(path)?;
     let mut r = BufReader::new(file);
@@ -183,6 +198,7 @@ pub fn load_sdf_cache(path: &str, size: usize) -> std::io::Result<Vec<f32>> {
 /// 🟢 PARAM-GUI: `mesh_scale_factor` (0.1..1.0, default 0.8) fließt in
 /// den Bake ein. Hinweis: der Cache wird nur umgangen, wenn er fehlt
 /// oder korrupt ist — Änderungen am Faktor erfordern Cache-Löschung.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_or_bake_sdf(obj_path: &str, mesh_scale_factor: f32) -> Vec<f32> {
     let res = SDF_GRID_RES;
     let total = res * res * res;
@@ -223,6 +239,32 @@ fn grid_cache() -> &'static Mutex<HashMap<(String, u32), Arc<Vec<f32>>>> {
 /// Bakes (nach GUI-Änderung des Faktors) nicht kollidieren. Der alte
 /// `.sdfcache`-Header speichert den Scale nicht — ein geänderter Faktor
 /// erfordert weiterhin das manuelle Löschen der Cache-Datei.
+/// Cross-platform: bakes from `obj_bytes` (e.g. from `AsyncFileDialog::read()` or `include_bytes!`)
+/// and caches it in `GRID_CACHE` under `(name, mesh_scale_factor)`.
+pub fn get_or_bake_grid_from_bytes(
+    name: &str,
+    obj_bytes: &[u8],
+    mesh_scale_factor: f32,
+) -> Arc<Vec<f32>> {
+    let key = (name.to_string(), mesh_scale_factor.to_bits());
+    if let Ok(cache) = grid_cache().lock() {
+        if let Some(grid) = cache.get(&key) {
+            return grid.clone();
+        }
+    }
+    let grid = Arc::new(load_obj_bytes_to_sdf(
+        obj_bytes,
+        SDF_GRID_RES,
+        mesh_scale_factor,
+    ));
+    if let Ok(mut cache) = grid_cache().lock() {
+        cache.insert(key, grid.clone());
+    }
+    grid
+}
+
+/// Native-only: reads from disk / `.sdfcache` and caches in `GRID_CACHE`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn get_or_bake_grid(obj_path: &str, mesh_scale_factor: f32) -> Arc<Vec<f32>> {
     let key = (obj_path.to_string(), mesh_scale_factor.to_bits());
     if let Ok(cache) = grid_cache().lock() {
@@ -236,3 +278,4 @@ pub fn get_or_bake_grid(obj_path: &str, mesh_scale_factor: f32) -> Arc<Vec<f32>>
     }
     grid
 }
+

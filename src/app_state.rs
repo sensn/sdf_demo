@@ -117,6 +117,7 @@ pub struct ApplicationState {
     // inaktiv) + Transform + Albedo/PBR. Parallele Vektoren, Index =
     // Slot-Index (0..MAX_SDF_OBJECTS).
     pub sdf_paths: Vec<String>,
+    pub sdf_bytes: Vec<Option<Vec<u8>>>,
     pub sdf_active: Vec<bool>,
     pub sdf_sizes: Vec<f32>,
     pub sdf_center_x: Vec<f32>,
@@ -252,6 +253,15 @@ impl Default for ApplicationState {
                 String::new(),
                 String::new(),
             ],
+            sdf_bytes: vec![
+    #[cfg(target_arch = "wasm32")]
+    Some(include_bytes!("../assets/statue.obj").to_vec()),
+    #[cfg(not(target_arch = "wasm32"))]
+    None,
+    None,
+    None,
+    None,
+],
             sdf_active: vec![true, false, false, false],
             sdf_sizes: vec![4.0, 4.0, 4.0, 4.0],
             sdf_center_x: vec![0.0, 3.0, -3.0, 0.0],
@@ -427,16 +437,27 @@ pub fn sdf_objects_data(&self) -> Vec<GpuFloat> {
     static EMPTY_GRID: std::sync::OnceLock<Arc<Vec<f32>>> = std::sync::OnceLock::new();
     let empty = EMPTY_GRID.get_or_init(|| Arc::new(vec![1.0e6_f32; grid_count]));
 
-    let mut grids: Vec<Arc<Vec<f32>>> = Vec::with_capacity(N);
+       let mut grids: Vec<Arc<Vec<f32>>> = Vec::with_capacity(N);
     for slot in 0..N {
         let path = self.sdf_paths.get(slot).map(|s| s.as_str()).unwrap_or("");
         let scale = self.mesh_scale_factor;
         if !path.is_empty() && self.sdf_active.get(slot).copied().unwrap_or(false) {
-            grids.push(crate::sdf_preprocessor::get_or_bake_grid(path, scale));
+            if let Some(Some(bytes)) = self.sdf_bytes.get(slot) {
+                grids.push(crate::sdf_preprocessor::get_or_bake_grid_from_bytes(
+                    path, bytes, scale,
+                ));
+            } else {
+                #[cfg(not(target_arch = "wasm32"))]
+                grids.push(crate::sdf_preprocessor::get_or_bake_grid(path, scale));
+
+                #[cfg(target_arch = "wasm32")]
+                grids.push(empty.clone());
+            }
         } else {
             grids.push(empty.clone());
         }
     }
+
 
     for slot in 0..N {
         // --- Header (Stride 24) ---

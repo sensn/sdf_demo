@@ -15,6 +15,11 @@ use cubecl::prelude::TensorArg;
 use cubecl_runtime::runtime::Runtime;
 use cubecl_runtime::server::Handle;
 use cubecl_wgpu::{init_device, RuntimeOptions, WgpuRuntime, WgpuSetup};
+//INIT
+use std::sync::OnceLock;
+
+static WGPU_ADAPTER: OnceLock<(wgpu::Instance, wgpu::Adapter)> = OnceLock::new();
+
 
 /// GPU float type — centralized precision control (see gpu.rs).
 pub type GpuFloat = f32;
@@ -253,31 +258,61 @@ impl SdfPipeline {
     }
 }
 
-impl iced::widget::shader::Pipeline for SdfPipeline {
-    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
-        use wgpu::util::DeviceExt;
-        // --- cubecl: eigener Vulkan-Adapter, aber Device+Queue von iced ---
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            flags: wgpu::InstanceFlags::empty(),
-            backend_options: wgpu::BackendOptions::default(),
-            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
-            display: None,
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+pub async fn init_wgpu_adapter() {
+    if WGPU_ADAPTER.get().is_some() {
+        return;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let backends = wgpu::Backends::VULKAN;
+    #[cfg(target_arch = "wasm32")]
+    let backends = wgpu::Backends::BROWSER_WEBGPU;
+
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends,
+        flags: wgpu::InstanceFlags::empty(),
+        backend_options: wgpu::BackendOptions::default(),
+        memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+        display: None,
+    });
+
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
             force_fallback_adapter: false,
             apply_limit_buckets: false,
-        }))
-        .expect("kein passender Vulkan-Adapter gefunden");
+        })
+        .await
+        .expect("No suitable WebGPU/Vulkan adapter found");
+
+    let _ = WGPU_ADAPTER.set((instance, adapter));
+}
+
+
+
+
+
+impl iced::widget::shader::Pipeline for SdfPipeline {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        use wgpu::util::DeviceExt;
+        // --- cubecl: Adapter aus OnceLock (vorab asynchron per Task::perform geholt) ---
+        let (instance, adapter) = WGPU_ADAPTER
+            .get()
+            .expect("WGPU_ADAPTER muss vor SdfPipeline::new initialisiert sein")
+            .clone();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let backend = wgpu::Backend::Vulkan;
+        #[cfg(target_arch = "wasm32")]
+        let backend = wgpu::Backend::BrowserWebGpu;
 
         let wgpu_setup = WgpuSetup {
             instance,
             adapter,
             device: device.clone(),
             queue: queue.clone(),
-            backend: wgpu::Backend::Vulkan,
+            backend,
         };
         let cubecl_device_id = init_device(wgpu_setup, RuntimeOptions::default());
         let client =
