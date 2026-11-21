@@ -3,7 +3,7 @@
 
 ## Live Demo (Web-Wasm WebGPU)
 
-The web build (`https://sensn.github.io/sdf_demo/`) uses **CubeCL** compute shaders via **WebGPU**, so your browser must have WebGPU hardware acceleration enabled.
+The web build ([https://sensn.github.io/sdf_demo/](https://sensn.github.io/sdf_demo/)) uses **CubeCL** compute shaders via **WebGPU**, so your browser must have WebGPU hardware acceleration enabled.
 
 ### Linux
 
